@@ -127,6 +127,19 @@ namespace litehtml
         bool       is_minmax = false;
     };
     using grid_track_vector = std::vector<grid_track_size>;
+
+    // A grid placement line (grid-column-start / grid-row-end / ...):
+    //   auto            -> is_auto, automatic placement
+    //   <integer>       -> explicit line number, 1-based (negative counts from the
+    //                      explicit-grid end); stored in `line`
+    //   span <integer>  -> `span` tracks
+    // A named <custom-ident> line is not resolved here (named lines are deferred).
+    struct grid_line
+    {
+        int  line    = 0;
+        int  span    = 0;
+        bool is_auto = true;
+    };
 } // namespace litehtml
 
 #endif // LITEHTML_CSS_LENGTH_H

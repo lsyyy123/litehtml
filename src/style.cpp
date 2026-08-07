@@ -316,6 +316,51 @@ namespace litehtml
         return true;
     }
 
+    // Parse one <grid-line> value (grid-column-start etc.): auto | <integer> |
+    // span <integer>. A named <custom-ident> line is rejected here (named lines
+    // are resolved later, with grid-template-areas).
+    static bool parse_grid_line_value(const css_token_vector& value, grid_line& out)
+    {
+        out = grid_line();
+        if(value.empty()) return false;
+        if(value.size() == 1 && value[0].type == IDENT && lowcase(value[0].ident()) == "auto")
+        {
+            return true; // is_auto
+        }
+        bool has_span = false;
+        bool has_int  = false;
+        int  int_val  = 0;
+        for(const auto& tok : value)
+        {
+            if(tok.type == IDENT && lowcase(tok.ident()) == "span")
+            {
+                has_span = true;
+            } else if(tok.type == NUMBER && tok.n.number_type == css_number_integer)
+            {
+                has_int = true;
+                int_val = static_cast<int>(tok.n.number);
+            } else
+            {
+                return false; // named line / unexpected token — unsupported
+            }
+        }
+        if(has_span)
+        {
+            if(!has_int || int_val < 1) return false;
+            out.span    = int_val;
+            out.is_auto = false;
+            return true;
+        }
+        if(has_int)
+        {
+            if(int_val == 0) return false; // line 0 is invalid
+            out.line    = int_val;
+            out.is_auto = false;
+            return true;
+        }
+        return false;
+    }
+
     // `value` is a list of component values with all whitespace tokens removed, including those inside component values
     void style::add_property(string_id name, const css_token_vector& value, const std::string& baseurl, bool important,
                              document_container* container)
@@ -731,6 +776,84 @@ namespace litehtml
             {
                 add_parsed_property(name, property_value(tracks, important));
             }
+            break;
+        }
+
+        // grid-column-start/end, grid-row-start/end = <grid-line>
+        case _grid_column_start_:
+        case _grid_column_end_:
+        case _grid_row_start_:
+        case _grid_row_end_:
+        {
+            grid_line gl;
+            if(parse_grid_line_value(value, gl))
+            {
+                add_parsed_property(name, property_value(gl, important));
+            }
+            break;
+        }
+
+        // grid-column / grid-row = <grid-line> [ / <grid-line> ]?
+        case _grid_column_:
+        case _grid_row_:
+        {
+            size_t slash = value.size();
+            for(size_t i = 0; i < value.size(); i++)
+            {
+                if(value[i].type == '/')
+                {
+                    slash = i;
+                    break;
+                }
+            }
+            css_token_vector start_toks(value.begin(), value.begin() + slash);
+            css_token_vector end_toks;
+            if(slash < value.size()) end_toks.assign(value.begin() + slash + 1, value.end());
+            grid_line start, end;
+            if(!parse_grid_line_value(start_toks, start)) break;
+            if(end_toks.empty())
+            {
+                // A lone span belongs to the end line (start becomes auto);
+                // otherwise the value is the start and the end is auto.
+                if(start.span > 0)
+                {
+                    end   = start;
+                    start = grid_line();
+                }
+            } else if(!parse_grid_line_value(end_toks, end))
+            {
+                break;
+            }
+            string_id sid_start = (name == _grid_column_) ? _grid_column_start_ : _grid_row_start_;
+            string_id sid_end   = (name == _grid_column_) ? _grid_column_end_ : _grid_row_end_;
+            add_parsed_property(sid_start, property_value(start, important));
+            add_parsed_property(sid_end, property_value(end, important));
+            break;
+        }
+
+        // grid-auto-flow = [ row | column ] || dense
+        case _grid_auto_flow_:
+        {
+            int  flow  = 0; // bit0 = column axis, bit1 = dense
+            bool valid = !value.empty();
+            for(const auto& tok : value)
+            {
+                if(tok.type != IDENT)
+                {
+                    valid = false;
+                    break;
+                }
+                const std::string id = lowcase(tok.ident());
+                if(id == "row") flow &= ~1;
+                else if(id == "column") flow |= 1;
+                else if(id == "dense") flow |= 2;
+                else
+                {
+                    valid = false;
+                    break;
+                }
+            }
+            if(valid) add_parsed_property(name, property_value(flow, important));
             break;
         }
 

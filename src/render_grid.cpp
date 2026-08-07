@@ -8,33 +8,24 @@
 
 std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const grid_track_vector& tracks,
                                                                            pixel_t available, bool available_definite,
-                                                                           int item_count,
+                                                                           const std::vector<std::shared_ptr<render_item>>& items,
+                                                                           const std::vector<grid_item_area>& areas, int ncols,
                                                                            const containing_block_context& self_size,
                                                                            formatting_context* fmt_ctx, pixel_t col_gap)
 {
-    // Collect in-flow items (document order == auto-placement order).
-    std::vector<std::shared_ptr<render_item>> items;
-    for(const auto& el : m_children)
-    {
-        auto disp = el->src_el()->css().get_display();
-        auto pos  = el->src_el()->css().get_position();
-        if(disp == display_none) continue;
-        if(pos == element_position_absolute || pos == element_position_fixed) continue;
-        items.push_back(el);
-    }
-
     const auto doc   = src_el()->get_document();
     const auto& fmet = css().get_font_metrics();
 
-    // Measure the max-content width of the items that land in a given column.
-    auto measure_column = [&](int col, int ncols) -> pixel_t {
-        const int nrows = (static_cast<int>(items.size()) + ncols - 1) / ncols;
-        pixel_t   max_w = 0_px;
-        for(int r = 0; r < nrows; r++)
+    // Measure the max-content width of the items placed in a given column. Only
+    // single-column-spanning items contribute directly; a multi-span item's size
+    // distribution across tracks is approximated by attributing it to its first
+    // column (spanning distribution is a known C19 simplification).
+    auto measure_column = [&](int col) -> pixel_t {
+        pixel_t max_w = 0_px;
+        for(size_t i = 0; i < items.size(); i++)
         {
-            int idx = r * ncols + col;
-            if(idx >= static_cast<int>(items.size())) break;
-            const auto& el = items[idx];
+            if(areas[i].col_start != col) continue;
+            const auto& el = items[i];
             pixel_t     w =
                 el->render(0_px, 0_px, self_size.new_width(available, containing_block_context::size_mode_content),
                            fmt_ctx)
@@ -45,17 +36,21 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
         return max_w;
     };
 
-    // `none` (empty track list) -> a single auto column holding every item.
-    if(tracks.empty())
+    // `none` (empty track list) with no grown implicit columns -> a single auto
+    // column holding every item. When placement grew the column count beyond the
+    // explicit list, fall through to the general loop (implicit tracks are auto).
+    if(tracks.empty() && ncols <= 1)
     {
         if(available_definite) return {available};
-        return {measure_column(0, 1)};
+        return {measure_column(0)};
     }
 
-    const int ncols = static_cast<int>(tracks.size());
-
     // The length a track sizes toward: the max bound for minmax(), else its value.
+    // A track index beyond the explicit list is an implicit (auto) track grown by
+    // definite placement.
     auto track_size = [&](int c) -> const css_length& {
+        static const css_length implicit_auto = css_length::predef_value(0);
+        if(c >= (int)tracks.size()) return implicit_auto;
         return tracks[c].is_minmax ? tracks[c].max : tracks[c].min;
     };
 
@@ -67,8 +62,8 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
     for(int c = 0; c < ncols; c++)
     {
         // A minmax() track sizes toward its max bound; a plain track uses its value.
-        const css_length& tr = tracks[c].is_minmax ? tracks[c].max : tracks[c].min;
-        if(tracks[c].is_minmax)
+        const css_length& tr = track_size(c);
+        if(c < (int)tracks.size() && tracks[c].is_minmax)
         {
             // Resolve the inflexible min bound into a floor. auto/min-content/
             // max-content minimums are not modelled (floored at 0); a percentage
@@ -130,7 +125,7 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
     // Content-size the auto (and indefinite-%/fr) columns from their items.
     for(int c = 0; c < ncols; c++)
     {
-        if(is_auto[c]) col_w[c] = measure_column(c, ncols);
+        if(is_auto[c]) col_w[c] = measure_column(c);
     }
 
     // Clamp each minmax() track up to its resolved min bound.
@@ -140,6 +135,174 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
     }
 
     return col_w;
+}
+
+int litehtml::render_item_grid::resolve_axis(const grid_line& gstart, const grid_line& gend, int explicit_count,
+                                             int& out_span)
+{
+    // Normalize a 1-based line number; a negative line counts back from the line
+    // after the last explicit track (line -1 == explicit_count + 1).
+    auto abs_line = [&](int line) -> int {
+        if(line < 0) return (explicit_count + 1) + line + 1;
+        return line;
+    };
+
+    const bool s_line = !gstart.is_auto && gstart.line != 0;
+    const bool e_line = !gend.is_auto && gend.line != 0;
+    const int  s_span = (!gstart.is_auto) ? gstart.span : 0;
+    const int  e_span = (!gend.is_auto) ? gend.span : 0;
+
+    int span = 1;
+    if(e_span > 0) span = e_span;
+    else if(s_span > 0) span = s_span;
+    else if(s_line && e_line)
+    {
+        span = abs_line(gend.line) - abs_line(gstart.line);
+    }
+    if(span < 1) span = 1;
+    out_span = span;
+
+    if(s_line) return abs_line(gstart.line) - 1;              // 0-based start track
+    if(e_line) return (abs_line(gend.line) - 1) - (span - 1); // end track, span tracks back
+    return -1;                                                // auto start
+}
+
+std::vector<litehtml::render_item_grid::grid_item_area>
+litehtml::render_item_grid::place_items(const std::vector<std::shared_ptr<render_item>>& items, int explicit_cols,
+                                        int explicit_rows, int& out_ncols, int& out_nrows)
+{
+    const bool col_flow = (css().get_grid_auto_flow() == grid_auto_flow_column);
+    const bool dense    = css().get_grid_auto_flow_dense();
+    const int  n        = static_cast<int>(items.size());
+
+    std::vector<int> col_start(n), col_span(n, 1), row_start(n), row_span(n, 1);
+    int              max_col = explicit_cols > 0 ? explicit_cols : 1;
+    int              max_row = explicit_rows > 0 ? explicit_rows : 0;
+    for(int i = 0; i < n; i++)
+    {
+        const auto& c  = items[i]->src_el()->css();
+        col_start[i]   = resolve_axis(c.get_grid_column_start(), c.get_grid_column_end(), explicit_cols, col_span[i]);
+        row_start[i]   = resolve_axis(c.get_grid_row_start(), c.get_grid_row_end(), explicit_rows, row_span[i]);
+        if(col_start[i] >= 0) max_col = (std::max)(max_col, col_start[i] + col_span[i]);
+        if(row_start[i] >= 0) max_row = (std::max)(max_row, row_start[i] + row_span[i]);
+    }
+    // In column flow the row count is the fixed axis; default to the explicit
+    // rows (or a single row when none) and let columns grow implicitly.
+    const int ncols = col_flow ? (explicit_cols > 0 ? explicit_cols : 1) : max_col;
+    const int fixed_rows = col_flow ? (explicit_rows > 0 ? explicit_rows : 1) : 0;
+
+    std::vector<grid_item_area> areas(n);
+
+    // Occupancy grid; rows (and columns in column flow) grow on demand.
+    std::vector<std::vector<char>> occ;
+    auto ensure = [&](int r, int c) {
+        if(r >= static_cast<int>(occ.size())) occ.resize(r + 1);
+        for(auto& row : occ)
+            if(c >= static_cast<int>(row.size())) row.resize(c + 1, 0);
+    };
+    auto fits = [&](int r, int c, int rs, int cs) -> bool {
+        if(r < 0 || c < 0) return false;
+        if(!col_flow && c + cs > ncols) return false;      // row flow: columns are bounded
+        if(col_flow && fixed_rows > 0 && r + rs > fixed_rows) return false; // column flow: rows bounded
+        if(r >= static_cast<int>(occ.size())) return true; // beyond placed rows = empty
+        for(int rr = r; rr < r + rs; rr++)
+            for(int cc = c; cc < c + cs; cc++)
+                if(rr < static_cast<int>(occ.size()) && cc < static_cast<int>(occ[rr].size()) && occ[rr][cc])
+                    return false;
+        return true;
+    };
+    auto mark = [&](int r, int c, int rs, int cs) {
+        ensure(r + rs - 1, c + cs - 1);
+        for(int rr = r; rr < r + rs; rr++)
+            for(int cc = c; cc < c + cs; cc++) occ[rr][cc] = 1;
+    };
+
+    // Phase 1: both axes definite.
+    for(int i = 0; i < n; i++)
+        if(col_start[i] >= 0 && row_start[i] >= 0)
+        {
+            areas[i] = {col_start[i], col_span[i], row_start[i], row_span[i]};
+            mark(row_start[i], col_start[i], row_span[i], col_span[i]);
+        }
+    // Phase 2: definite row, auto column — scan that row for a free column span.
+    for(int i = 0; i < n; i++)
+        if(row_start[i] >= 0 && col_start[i] < 0)
+        {
+            int c = 0;
+            while(!fits(row_start[i], c, row_span[i], col_span[i]))
+            {
+                c++;
+                // Row flow bounds the columns: an over-wide span that no column
+                // position fits is placed at the row origin (overlap tolerated).
+                if(!col_flow && c + col_span[i] > ncols) { c = 0; break; }
+            }
+            areas[i] = {c, col_span[i], row_start[i], row_span[i]};
+            mark(row_start[i], c, row_span[i], col_span[i]);
+        }
+    // Phase 3: the rest (auto row). Cursor advances per auto-flow.
+    int cur_r = 0, cur_c = 0;
+    for(int i = 0; i < n; i++)
+    {
+        if(row_start[i] >= 0) continue; // already placed
+        const int cs = col_span[i], rs = row_span[i];
+        if(col_start[i] >= 0)
+        {
+            // Definite column, auto row: scan down that column from the top.
+            int c = col_start[i], r = 0;
+            while(!fits(r, c, rs, cs))
+            {
+                r++;
+                // Column flow bounds the rows: an over-tall span that no row
+                // position fits is placed at the column origin (overlap tolerated).
+                if(col_flow && fixed_rows > 0 && r + rs > fixed_rows) { r = 0; break; }
+            }
+            areas[i] = {c, cs, r, rs};
+            mark(r, c, rs, cs);
+            continue;
+        }
+        // Fully auto. Dense repacks from the origin; sparse keeps moving forward.
+        if(dense)
+        {
+            cur_r = 0;
+            cur_c = 0;
+        }
+        int r, c;
+        for(;;)
+        {
+            r = cur_r;
+            c = cur_c;
+            if(!col_flow && c + cs > ncols)
+            {
+                cur_c = 0;
+                cur_r++;
+                continue;
+            }
+            if(col_flow && fixed_rows > 0 && r + rs > fixed_rows)
+            {
+                cur_r = 0;
+                cur_c++;
+                continue;
+            }
+            if(fits(r, c, rs, cs)) break;
+            if(col_flow) cur_r++;
+            else cur_c++;
+        }
+        areas[i] = {c, cs, r, rs};
+        mark(r, c, rs, cs);
+        if(col_flow) cur_r = r + rs;
+        else cur_c = c + cs;
+    }
+
+    int nrows = max_row;
+    int ncols_final = ncols;
+    for(int i = 0; i < n; i++)
+    {
+        nrows       = (std::max)(nrows, areas[i].row_start + areas[i].row_span);
+        ncols_final = (std::max)(ncols_final, areas[i].col_start + areas[i].col_span);
+    }
+    out_ncols = ncols_final;
+    out_nrows = nrows;
+    return areas;
 }
 
 litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, pixel_t y, bool /*second_pass*/,
@@ -184,10 +347,15 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     // (content-box width). row-gap (below) resolves against the block size.
     const pixel_t col_gap = css().get_column_gap().calc_percent(content_width);
 
-    std::vector<pixel_t> col_w = resolve_columns(cols_t, content_width, width_definite,
-                                                 static_cast<int>(items.size()), self_size, fmt_ctx, col_gap);
-    const int ncols = static_cast<int>(col_w.size());
-    const int nrows = (static_cast<int>(items.size()) + ncols - 1) / ncols;
+    // Place every in-flow item into a concrete grid area: explicit line-based
+    // placement first, then auto-flow for the rest. Grows implicit tracks and
+    // yields the final column/row counts.
+    int                         ncols = 0, nrows = 0;
+    std::vector<grid_item_area> areas = place_items(items, static_cast<int>(cols_t.size()),
+                                                    static_cast<int>(rows_t.size()), ncols, nrows);
+
+    std::vector<pixel_t> col_w = resolve_columns(cols_t, content_width, width_definite, items, areas,
+                                                 ncols, self_size, fmt_ctx, col_gap);
 
     // The grid's content-box width: the definite containing-block width, or the
     // sum of the content-sized columns (plus the gaps between them) when
@@ -242,11 +410,36 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
         row_fixed[r] = true;
     }
 
+    // Width/height spanned by an item across its tracks, including the gaps
+    // between the spanned tracks.
+    auto span_w = [&](int col_start, int span) -> pixel_t {
+        pixel_t w = 0_px;
+        for(int k = 0; k < span; k++)
+        {
+            w += col_w[col_start + k];
+            if(k) w += col_gap;
+        }
+        return w;
+    };
+    auto span_h = [&](int row_start, int span) -> pixel_t {
+        pixel_t h = 0_px;
+        for(int k = 0; k < span; k++)
+        {
+            h += row_h[row_start + k];
+            if(k) h += row_gap;
+        }
+        return h;
+    };
+
     for(int i = 0; i < static_cast<int>(items.size()); i++)
     {
-        int r = i / ncols;
-        int c = i % ncols;
-        items[i]->render(0_px, 0_px, self_size.new_width(col_w[c] - items[i]->content_offset_width()), fmt_ctx);
+        const int c = areas[i].col_start;
+        const int r = areas[i].row_start;
+        // A multi-span item's height is attributed to its first row (spanning
+        // distribution across rows is a known C19 simplification).
+        items[i]->render(0_px, 0_px,
+                         self_size.new_width(span_w(c, areas[i].col_span) - items[i]->content_offset_width()),
+                         fmt_ctx);
         if(!row_fixed[r] && items[i]->bottom() > row_h[r]) row_h[r] = items[i]->bottom();
     }
 
@@ -269,19 +462,21 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
 
     for(int i = 0; i < static_cast<int>(items.size()); i++)
     {
-        int   r        = i / ncols;
-        int   c        = i % ncols;
-        auto& el       = items[i];
-        bool  h_auto   = el->css().get_height().is_predefined();
-        bool  replaced = el->src_el()->is_replaced();
+        const int c        = areas[i].col_start;
+        const int r        = areas[i].row_start;
+        auto&     el       = items[i];
+        bool      h_auto   = el->css().get_height().is_predefined();
+        bool      replaced = el->src_el()->is_replaced();
         if(h_auto && !replaced)
         {
-            auto cb = self_size.new_width_height(col_w[c] - el->content_offset_width(),
-                                                 row_h[r] - el->content_offset_height(),
-                                                 containing_block_context::size_mode_exact_width |
-                                                     containing_block_context::size_mode_exact_height);
+            const pixel_t iw = span_w(c, areas[i].col_span);
+            const pixel_t ih = span_h(r, areas[i].row_span);
+            auto          cb = self_size.new_width_height(iw - el->content_offset_width(),
+                                                          ih - el->content_offset_height(),
+                                                          containing_block_context::size_mode_exact_width |
+                                                              containing_block_context::size_mode_exact_height);
             el->render(0_px, 0_px, cb, fmt_ctx);
-            el->pos().height = row_h[r] - el->content_offset_height();
+            el->pos().height = ih - el->content_offset_height();
         }
         el->pos().x = col_x[c] + el->content_offset_left();
         el->pos().y = row_y[r] + el->content_offset_top();

@@ -639,6 +639,11 @@ void litehtml::css_properties::compute_grid(const html_tag* el, const document::
                                                                       grid_track_vector(), offset(m_grid_template_columns));
         m_grid_template_rows    = el->get_property<grid_track_vector>(_grid_template_rows_, false,
                                                                       grid_track_vector(), offset(m_grid_template_rows));
+        // grid-auto-flow is stored as an int: bit0 = axis (0 row / 1 column),
+        // bit1 = dense packing.
+        int flow                 = el->get_property<int>(_grid_auto_flow_, false, 0, offset(m_grid_auto_flow));
+        m_grid_auto_flow         = (flow & 1) ? grid_auto_flow_column : grid_auto_flow_row;
+        m_grid_auto_flow_dense   = (flow & 2) != 0;
     }
     auto parent = el->parent();
     if(parent && (parent->css().m_display == display_grid || parent->css().m_display == display_inline_grid))
@@ -658,6 +663,15 @@ void litehtml::css_properties::compute_grid(const html_tag* el, const document::
         {
             m_display = display_grid;
         }
+        // Grid item placement lines (grid-column-start/end, grid-row-start/end).
+        m_grid_column_start = el->get_property<grid_line>(_grid_column_start_, false, grid_line(),
+                                                          offset(m_grid_column_start));
+        m_grid_column_end   = el->get_property<grid_line>(_grid_column_end_, false, grid_line(),
+                                                          offset(m_grid_column_end));
+        m_grid_row_start    = el->get_property<grid_line>(_grid_row_start_, false, grid_line(),
+                                                          offset(m_grid_row_start));
+        m_grid_row_end      = el->get_property<grid_line>(_grid_row_end_, false, grid_line(),
+                                                          offset(m_grid_row_end));
     }
 }
 

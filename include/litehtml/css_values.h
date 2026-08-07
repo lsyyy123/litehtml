@@ -572,6 +572,17 @@ namespace litehtml
     };
 
     // ==========================================================
+    // CSS Property: grid-auto-flow (direction axis; `dense` is a separate flag)
+    // ==========================================================
+    inline constexpr auto grid_auto_flow_strings = split_css_values<2>("row;column");
+
+    enum grid_auto_flow
+    {
+        grid_auto_flow_row,
+        grid_auto_flow_column
+    };
+
+    // ==========================================================
     // CSS Property: flex-justify-content
     // ==========================================================
     inline constexpr auto flex_justify_content_strings = split_css_values<12>(

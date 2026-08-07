@@ -103,6 +103,15 @@ namespace litehtml
         grid_track_vector m_grid_template_columns;
         grid_track_vector m_grid_template_rows;
 
+        // CSS Grid item placement lines (grid-column-start/end, grid-row-start/end).
+        grid_line m_grid_column_start;
+        grid_line m_grid_column_end;
+        grid_line m_grid_row_start;
+        grid_line m_grid_row_end;
+        // CSS Grid container auto-placement flow (grid-auto-flow): axis + dense flag.
+        grid_auto_flow m_grid_auto_flow       = grid_auto_flow_row;
+        bool           m_grid_auto_flow_dense = false;
+
         caption_side m_caption_side = caption_side_top;
 
         int m_order = 0;
@@ -255,6 +264,12 @@ namespace litehtml
 
         const grid_track_vector& get_grid_template_columns() const;
         const grid_track_vector& get_grid_template_rows() const;
+        const grid_line&         get_grid_column_start() const;
+        const grid_line&         get_grid_column_end() const;
+        const grid_line&         get_grid_row_start() const;
+        const grid_line&         get_grid_row_end() const;
+        grid_auto_flow           get_grid_auto_flow() const;
+        bool                     get_grid_auto_flow_dense() const;
 
         int  get_order() const;
         void set_order(int order);
@@ -717,6 +732,31 @@ namespace litehtml
     inline const grid_track_vector& css_properties::get_grid_template_rows() const
     {
         return m_grid_template_rows;
+    }
+
+    inline const grid_line& css_properties::get_grid_column_start() const
+    {
+        return m_grid_column_start;
+    }
+    inline const grid_line& css_properties::get_grid_column_end() const
+    {
+        return m_grid_column_end;
+    }
+    inline const grid_line& css_properties::get_grid_row_start() const
+    {
+        return m_grid_row_start;
+    }
+    inline const grid_line& css_properties::get_grid_row_end() const
+    {
+        return m_grid_row_end;
+    }
+    inline grid_auto_flow css_properties::get_grid_auto_flow() const
+    {
+        return m_grid_auto_flow;
+    }
+    inline bool css_properties::get_grid_auto_flow_dense() const
+    {
+        return m_grid_auto_flow_dense;
     }
 
     inline caption_side css_properties::get_caption_side() const
