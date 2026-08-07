@@ -116,6 +116,17 @@ namespace litehtml
         }
         return 0_px;
     }
+
+    // A single CSS Grid track sizing function. For a plain <track-size> the value
+    // lives in `min` and `is_minmax` is false; for minmax(min, max) both bounds are
+    // kept so the layout can size toward `max` while flooring at `min`.
+    struct grid_track_size
+    {
+        css_length min;
+        css_length max;
+        bool       is_minmax = false;
+    };
+    using grid_track_vector = std::vector<grid_track_size>;
 } // namespace litehtml
 
 #endif // LITEHTML_CSS_LENGTH_H

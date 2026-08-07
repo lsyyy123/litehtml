@@ -29,8 +29,9 @@ namespace litehtml
         // when `available_definite`; otherwise (shrink-to-fit) percentage/fr/auto
         // tracks are content sized. Auto/min/max-content tracks are measured from
         // the items placed in that column. `col_gap` is the resolved column-gap;
-        // it is subtracted from the free space distributed to fr tracks.
-        std::vector<pixel_t> resolve_columns(const length_vector& tracks, pixel_t available, bool available_definite,
+        // it is subtracted from the free space distributed to fr tracks. A
+        // minmax() track sizes toward its max bound, floored at its min bound.
+        std::vector<pixel_t> resolve_columns(const grid_track_vector& tracks, pixel_t available, bool available_definite,
                                              int item_count, const containing_block_context& self_size,
                                              formatting_context* fmt_ctx, pixel_t col_gap);
 

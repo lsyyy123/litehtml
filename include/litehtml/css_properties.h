@@ -97,10 +97,11 @@ namespace litehtml
         css_length           m_column_gap;
 
         // CSS Grid: explicit track lists for grid-template-columns/rows.
-        // Each entry is a css_length: absolute unit / percentage / fr, or a
-        // predefined value (auto/min-content/max-content). Empty vector = none.
-        length_vector m_grid_template_columns;
-        length_vector m_grid_template_rows;
+        // Each entry is a grid_track_size: a plain <track-size> (absolute unit /
+        // percentage / fr / auto / min-content / max-content) or minmax(min,max).
+        // Empty vector = none.
+        grid_track_vector m_grid_template_columns;
+        grid_track_vector m_grid_template_rows;
 
         caption_side m_caption_side = caption_side_top;
 
@@ -252,8 +253,8 @@ namespace litehtml
         const css_length&    get_row_gap() const;
         const css_length&    get_column_gap() const;
 
-        const length_vector& get_grid_template_columns() const;
-        const length_vector& get_grid_template_rows() const;
+        const grid_track_vector& get_grid_template_columns() const;
+        const grid_track_vector& get_grid_template_rows() const;
 
         int  get_order() const;
         void set_order(int order);
@@ -708,12 +709,12 @@ namespace litehtml
         return m_column_gap;
     }
 
-    inline const length_vector& css_properties::get_grid_template_columns() const
+    inline const grid_track_vector& css_properties::get_grid_template_columns() const
     {
         return m_grid_template_columns;
     }
 
-    inline const length_vector& css_properties::get_grid_template_rows() const
+    inline const grid_track_vector& css_properties::get_grid_template_rows() const
     {
         return m_grid_template_rows;
     }

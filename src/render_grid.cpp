@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <vector>
 
-std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const length_vector& tracks,
+std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const grid_track_vector& tracks,
                                                                            pixel_t available, bool available_definite,
                                                                            int item_count,
                                                                            const containing_block_context& self_size,
@@ -54,13 +54,32 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
 
     const int ncols = static_cast<int>(tracks.size());
 
+    // The length a track sizes toward: the max bound for minmax(), else its value.
+    auto track_size = [&](int c) -> const css_length& {
+        return tracks[c].is_minmax ? tracks[c].max : tracks[c].min;
+    };
+
     std::vector<pixel_t> col_w(ncols, 0_px);
+    std::vector<pixel_t> floor_px(ncols, 0_px); // minmax() min bound, resolved
     std::vector<bool>    is_auto(ncols, false);
     float                total_fr = 0.0f;
 
     for(int c = 0; c < ncols; c++)
     {
-        const css_length& tr = tracks[c];
+        // A minmax() track sizes toward its max bound; a plain track uses its value.
+        const css_length& tr = tracks[c].is_minmax ? tracks[c].max : tracks[c].min;
+        if(tracks[c].is_minmax)
+        {
+            // Resolve the inflexible min bound into a floor. auto/min-content/
+            // max-content minimums are not modelled (floored at 0); a percentage
+            // minimum against an indefinite width also resolves to 0.
+            const css_length& mn = tracks[c].min;
+            if(!mn.is_predefined() && mn.units() != css_units_fr &&
+               (mn.units() != css_units_percentage || available_definite))
+            {
+                floor_px[c] = doc->to_pixels(mn, fmet, available);
+            }
+        }
         if(tr.is_predefined())
         {
             // auto / min-content / max-content -> content sized (measured below).
@@ -94,16 +113,16 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
         pixel_t used = 0_px;
         for(int c = 0; c < ncols; c++)
         {
-            if(!is_auto[c] && tracks[c].units() != css_units_fr) used += col_w[c];
+            if(!is_auto[c] && track_size(c).units() != css_units_fr) used += col_w[c];
         }
         if(ncols > 1) used += pixel_t(ncols - 1) * col_gap;
         pixel_t free_space = available - used;
         if(free_space < 0_px) free_space = 0_px;
         for(int c = 0; c < ncols; c++)
         {
-            if(!is_auto[c] && tracks[c].units() == css_units_fr)
+            if(!is_auto[c] && track_size(c).units() == css_units_fr)
             {
-                col_w[c] = free_space * (tracks[c].val() / total_fr);
+                col_w[c] = free_space * (track_size(c).val() / total_fr);
             }
         }
     }
@@ -112,6 +131,12 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
     for(int c = 0; c < ncols; c++)
     {
         if(is_auto[c]) col_w[c] = measure_column(c, ncols);
+    }
+
+    // Clamp each minmax() track up to its resolved min bound.
+    for(int c = 0; c < ncols; c++)
+    {
+        if(col_w[c] < floor_px[c]) col_w[c] = floor_px[c];
     }
 
     return col_w;
@@ -152,8 +177,8 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
         return {empty_w, empty_w};
     }
 
-    const length_vector& cols_t = css().get_grid_template_columns();
-    const length_vector& rows_t = css().get_grid_template_rows();
+    const grid_track_vector& cols_t = css().get_grid_template_columns();
+    const grid_track_vector& rows_t = css().get_grid_template_rows();
 
     // column-gap resolves its percentage against the container's inline size
     // (content-box width). row-gap (below) resolves against the block size.
@@ -199,10 +224,21 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     for(int r = 0; r < nrows; r++)
     {
         if(r >= static_cast<int>(rows_t.size())) break;
-        const css_length& tr = rows_t[r];
+        // A minmax() row sizes toward its max bound; the min bound floors it below.
+        const css_length& tr = rows_t[r].is_minmax ? rows_t[r].max : rows_t[r].min;
         if(tr.is_predefined() || tr.units() == css_units_fr) continue; // auto/fr -> content sized
         if(tr.units() == css_units_percentage && !height_definite) continue; // indefinite -> auto
-        row_h[r]     = doc->to_pixels(tr, fmet, height_base);
+        row_h[r] = doc->to_pixels(tr, fmet, height_base);
+        if(rows_t[r].is_minmax)
+        {
+            const css_length& mn = rows_t[r].min;
+            if(!mn.is_predefined() && mn.units() != css_units_fr &&
+               (mn.units() != css_units_percentage || height_definite))
+            {
+                pixel_t mn_px = doc->to_pixels(mn, fmet, height_base);
+                if(row_h[r] < mn_px) row_h[r] = mn_px;
+            }
+        }
         row_fixed[r] = true;
     }
 

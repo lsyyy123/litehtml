@@ -183,41 +183,137 @@ namespace litehtml
     // fr (css_units_fr), or a predefined value for auto/min-content/max-content.
     // repeat()/minmax() and named lines are not yet supported (return false so
     // the template falls back to `none`, i.e. a single auto track).
-    static bool parse_grid_track_list(const css_token_vector& value, length_vector& out)
+    // Parse one <track-breadth> (length / percentage / fr / auto / min-content /
+    // max-content) from a single component value. `allow_fr` is false for the
+    // minimum of a minmax(), which is always inflexible.
+    static bool parse_grid_track_breadth(const css_token_vector& toks, bool allow_fr, css_length& out)
+    {
+        if(toks.size() != 1) return false;
+        const css_token& tok = toks[0];
+        if(tok.type == DIMENSION)
+        {
+            if(!out.from_token(tok, f_length)) return false;
+            if(!allow_fr && out.units() == css_units_fr) return false;
+            return true;
+        }
+        if(tok.type == PERCENTAGE) return out.from_token(tok, f_percentage);
+        if(tok.type == IDENT)
+        {
+            const std::string id = lowcase(tok.ident());
+            if(id == "auto" || id == "min-content" || id == "max-content")
+            {
+                out = css_length::predef_value(0);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static bool parse_grid_track_list(const css_token_vector& value, grid_track_vector& out, bool in_repeat = false);
+    static bool parse_grid_repeat(const css_token_vector& args, grid_track_vector& out);
+    static bool parse_grid_minmax(const css_token_vector& args, grid_track_vector& out);
+
+    static bool parse_grid_track_list(const css_token_vector& value, grid_track_vector& out, bool in_repeat)
     {
         out.clear();
-        if(value.size() == 1 && value[0].type == IDENT && value[0].ident() == "none")
+        if(!in_repeat && value.size() == 1 && value[0].type == IDENT && value[0].ident() == "none")
         {
             return true; // empty -> none
         }
         for(const auto& tok : value)
         {
-            css_length len;
+            if(tok.type == CV_FUNCTION)
+            {
+                const std::string fn = lowcase(tok.name());
+                if(fn == "repeat")
+                {
+                    if(in_repeat) return false; // repeat() may not be nested
+                    if(!parse_grid_repeat(tok.value, out)) return false;
+                } else if(fn == "minmax")
+                {
+                    if(!parse_grid_minmax(tok.value, out)) return false;
+                } else
+                {
+                    return false; // fit-content()/etc. unsupported
+                }
+                continue;
+            }
+            grid_track_size trk;
+            css_length      len;
             if(tok.type == DIMENSION)
             {
                 if(!len.from_token(tok, f_length)) return false;
-                out.push_back(len);
             } else if(tok.type == PERCENTAGE)
             {
                 if(!len.from_token(tok, f_percentage)) return false;
-                out.push_back(len);
             } else if(tok.type == IDENT)
             {
                 const std::string id = tok.ident();
                 if(id == "auto" || id == "min-content" || id == "max-content")
                 {
-                    out.push_back(css_length::predef_value(0));
+                    len = css_length::predef_value(0);
                 } else
                 {
-                    return false;
+                    return false; // line names [x] etc. unsupported
                 }
             } else
             {
-                // CV_FUNCTION (minmax/repeat), line names [x], etc. — unsupported
                 return false;
             }
+            trk.min = len;
+            out.push_back(trk);
         }
         return !out.empty();
+    }
+
+    static bool parse_grid_repeat(const css_token_vector& args, grid_track_vector& out)
+    {
+        // args = [<count> , <track-item>...]; find the top-level comma.
+        size_t comma = args.size();
+        for(size_t i = 0; i < args.size(); i++)
+        {
+            if(args[i].type == ',')
+            {
+                comma = i;
+                break;
+            }
+        }
+        if(comma != 1 || comma >= args.size() - 1) return false; // exactly "<count>," then >=1 track
+        const css_token& cnt = args[0];
+        if(cnt.type != NUMBER || cnt.n.number_type != css_number_integer) return false; // auto-fill/auto-fit deferred
+        int count = static_cast<int>(cnt.n.number);
+        if(count < 1) return false;
+        css_token_vector  sub(args.begin() + comma + 1, args.end());
+        grid_track_vector sub_tracks;
+        if(!parse_grid_track_list(sub, sub_tracks, true)) return false;
+        for(int i = 0; i < count; i++)
+        {
+            out.insert(out.end(), sub_tracks.begin(), sub_tracks.end());
+        }
+        return true;
+    }
+
+    static bool parse_grid_minmax(const css_token_vector& args, grid_track_vector& out)
+    {
+        // args = [<min> , <max>]; find the top-level comma.
+        size_t comma = args.size();
+        for(size_t i = 0; i < args.size(); i++)
+        {
+            if(args[i].type == ',')
+            {
+                comma = i;
+                break;
+            }
+        }
+        if(comma == 0 || comma >= args.size() - 1) return false;
+        grid_track_size trk;
+        trk.is_minmax = true;
+        css_token_vector min_toks(args.begin(), args.begin() + comma);
+        css_token_vector max_toks(args.begin() + comma + 1, args.end());
+        if(!parse_grid_track_breadth(min_toks, false, trk.min)) return false; // min is inflexible
+        if(!parse_grid_track_breadth(max_toks, true, trk.max)) return false;
+        out.push_back(trk);
+        return true;
     }
 
     // `value` is a list of component values with all whitespace tokens removed, including those inside component values
@@ -630,7 +726,7 @@ namespace litehtml
         case _grid_template_columns_:
         case _grid_template_rows_:
         {
-            length_vector tracks;
+            grid_track_vector tracks;
             if(parse_grid_track_list(value, tracks))
             {
                 add_parsed_property(name, property_value(tracks, important));

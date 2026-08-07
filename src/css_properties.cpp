@@ -635,10 +635,10 @@ void litehtml::css_properties::compute_grid(const html_tag* el, const document::
 {
     if(m_display == display_grid || m_display == display_inline_grid)
     {
-        m_grid_template_columns = el->get_property<length_vector>(_grid_template_columns_, false, length_vector(),
-                                                                  offset(m_grid_template_columns));
-        m_grid_template_rows    = el->get_property<length_vector>(_grid_template_rows_, false, length_vector(),
-                                                                  offset(m_grid_template_rows));
+        m_grid_template_columns = el->get_property<grid_track_vector>(_grid_template_columns_, false,
+                                                                      grid_track_vector(), offset(m_grid_template_columns));
+        m_grid_template_rows    = el->get_property<grid_track_vector>(_grid_template_rows_, false,
+                                                                      grid_track_vector(), offset(m_grid_template_rows));
     }
     auto parent = el->parent();
     if(parent && (parent->css().m_display == display_grid || parent->css().m_display == display_inline_grid))
