@@ -160,7 +160,19 @@ void Bitmap::load(string filename)
 
 void Bitmap::save(string filename)
 {
-    lodepng::encode(filename, (byte*) data.data(), width, height);
+    // Force 8-bit RGBA output. lodepng's auto_convert would otherwise pick a
+    // palette/bit-depth for few-color images; the reftest pipeline's PNG decoder
+    // expects a fixed RGBA format, so drive the encoder State explicitly.
+    lodepng::State state;
+    state.info_raw.colortype       = LCT_RGBA;
+    state.info_raw.bitdepth        = 8;
+    state.info_png.color.colortype = LCT_RGBA;
+    state.info_png.color.bitdepth  = 8;
+    state.encoder.auto_convert     = 0;
+    std::vector<unsigned char> png;
+    unsigned err = lodepng::encode(png, (const unsigned char*) data.data(), width, height, state);
+    if(!err) err = lodepng::save_file(png, filename);
+    (void) err;
 }
 
 // This function can be used to compare gradient rendering between different browsers.
