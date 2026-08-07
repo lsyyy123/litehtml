@@ -18,7 +18,8 @@ namespace litehtml
     }; // "inherit" was specified as the value of this property
 
     struct property_value
-        : variant<invalid, inherit, int, int_vector, css_length, length_vector, grid_track_vector, grid_line, float,
+        : variant<invalid, inherit, int, int_vector, css_length, length_vector, grid_track_vector, grid_line,
+                  grid_area_map, float,
                   web_color, std::vector<image>, std::string, std::vector<std::string>, size_vector, css_token_vector>
     {
         bool m_important = false;

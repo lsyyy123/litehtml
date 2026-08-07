@@ -183,11 +183,11 @@ namespace litehtml
     // Parse a <track-list> for grid-template-columns/rows into a length_vector.
     // Each track becomes a css_length: px/em/etc (its unit), % (percentage),
     // fr (css_units_fr), or a predefined value for auto/min-content/max-content.
-    // repeat()/minmax() and named lines are not yet supported (return false so
-    // the template falls back to `none`, i.e. a single auto track).
-    // Parse one <track-breadth> (length / percentage / fr / auto / min-content /
-    // max-content) from a single component value. `allow_fr` is false for the
-    // minimum of a minmax(), which is always inflexible.
+        // Parse one <track-breadth> (length / percentage / fr / auto / min-content /
+        // max-content) from a single component value. `allow_fr` is false for the
+        // minimum of a minmax(), which is always inflexible. Named lines [a b] are
+        // supported and attach to the following track; fit-content() and
+        // auto-fill/auto-fit repeat() remain deferred (parse failure -> none).
     static bool parse_grid_track_breadth(const css_token_vector& toks, bool allow_fr, css_length& out)
     {
         if(toks.size() != 1) return false;
@@ -222,18 +222,44 @@ namespace litehtml
         {
             return true; // empty -> none
         }
+        // Named lines: [a b] attaches names to the line *before* the following
+        // track. Pending names are carried (pending_names) until the next track is
+        // pushed; a bracket before the first track thus lands its names on the
+        // first track (line 1). A trailing bracket is dropped (end-line naming is
+        // available via grid-template-areas instead).
+        std::vector<std::string> pending_names;
+        auto push_track = [&](grid_track_size trk) {
+            if(!pending_names.empty())
+            {
+                trk.line_names = pending_names;
+                pending_names.clear();
+            }
+            out.push_back(trk);
+        };
         for(const auto& tok : value)
         {
+            // [name ...] -> a named line before the next track.
+            if(tok.type == SQUARE_BLOCK)
+            {
+                for(const auto& sub : tok.value)
+                {
+                    if(sub.type == IDENT) pending_names.push_back(lowcase(sub.ident()));
+                }
+                continue;
+            }
             if(tok.type == CV_FUNCTION)
             {
                 const std::string fn = lowcase(tok.name());
                 if(fn == "repeat")
                 {
                     if(in_repeat) return false; // repeat() may not be nested
+                    if(!pending_names.empty()) return false; // [name] repeat() is unsupported (names inside repeat)
                     if(!parse_grid_repeat(tok.value, out)) return false;
                 } else if(fn == "minmax")
                 {
-                    if(!parse_grid_minmax(tok.value, out)) return false;
+                    grid_track_vector mm;
+                    if(!parse_grid_minmax(tok.value, mm)) return false;
+                    for(auto& t : mm) push_track(t);
                 } else
                 {
                     return false; // fit-content()/etc. unsupported
@@ -256,15 +282,19 @@ namespace litehtml
                     len = css_length::predef_value(0);
                 } else
                 {
-                    return false; // line names [x] etc. unsupported
+                    return false;
                 }
             } else
             {
                 return false;
             }
             trk.min = len;
-            out.push_back(trk);
+            push_track(trk);
         }
+        // A trailing [name] with no following track names the end line; it is not
+        // representable on a track here and is dropped (the end line stays usable
+        // via grid-template-areas). Leading-edge names already attached to the
+        // first track through push_track.
         return !out.empty();
     }
 
@@ -319,8 +349,9 @@ namespace litehtml
     }
 
     // Parse one <grid-line> value (grid-column-start etc.): auto | <integer> |
-    // span <integer>. A named <custom-ident> line is rejected here (named lines
-    // are resolved later, with grid-template-areas).
+    // span <integer> | <custom-ident> | span <custom-ident> | <integer> <custom-ident>.
+    // A named line keeps its ident in `name` (resolved against the container's
+    // named lines / areas at layout time).
     static bool parse_grid_line_value(const css_token_vector& value, grid_line& out)
     {
         out = grid_line();
@@ -329,9 +360,10 @@ namespace litehtml
         {
             return true; // is_auto
         }
-        bool has_span = false;
-        bool has_int  = false;
-        int  int_val  = 0;
+        bool        has_span = false;
+        bool        has_int  = false;
+        int         int_val  = 0;
+        std::string name;
         for(const auto& tok : value)
         {
             if(tok.type == IDENT && lowcase(tok.ident()) == "span")
@@ -341,15 +373,22 @@ namespace litehtml
             {
                 has_int = true;
                 int_val = static_cast<int>(tok.n.number);
+            } else if(tok.type == IDENT)
+            {
+                const std::string id = lowcase(tok.ident());
+                // Reserved CSS-wide keywords / `auto` cannot be line names.
+                if(id == "auto" || id == "span") return false;
+                name = id;
             } else
             {
-                return false; // named line / unexpected token — unsupported
+                return false; // unexpected token
             }
         }
         if(has_span)
         {
-            if(!has_int || int_val < 1) return false;
-            out.span    = int_val;
+            if(has_int && int_val < 1) return false;
+            out.span    = has_int ? int_val : 1; // "span <ident>" defaults the count to 1
+            out.name    = name;
             out.is_auto = false;
             return true;
         }
@@ -357,6 +396,13 @@ namespace litehtml
         {
             if(int_val == 0) return false; // line 0 is invalid
             out.line    = int_val;
+            out.name    = name; // "<int> <ident>" picks the int-th line named `name`
+            out.is_auto = false;
+            return true;
+        }
+        if(!name.empty())
+        {
+            out.name    = name;
             out.is_auto = false;
             return true;
         }
@@ -830,6 +876,109 @@ namespace litehtml
             string_id sid_end   = (name == _grid_column_) ? _grid_column_end_ : _grid_row_end_;
             add_parsed_property(sid_start, property_value(start, important));
             add_parsed_property(sid_end, property_value(end, important));
+            break;
+        }
+
+        // grid-template-areas = none | <string>+  (each string is one row of cells)
+        case _grid_template_areas_:
+        {
+            grid_area_map map;
+            if(value.size() == 1 && value[0].type == IDENT && lowcase(value[0].ident()) == "none")
+            {
+                add_parsed_property(name, property_value(map, important)); // empty map = none
+                break;
+            }
+            // Split each row string into cell names (whitespace-separated).
+            std::vector<std::vector<std::string>> rows;
+            for(const auto& tok : value)
+            {
+                if(tok.type != STRING) { rows.clear(); break; }
+                std::vector<std::string> cells;
+                std::string            cur;
+                for(char ch : tok.str())
+                {
+                    if(ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f')
+                    {
+                        if(!cur.empty()) { cells.push_back(cur); cur.clear(); }
+                    } else
+                    {
+                        cur += ch;
+                    }
+                }
+                if(!cur.empty()) cells.push_back(cur);
+                if(cells.empty()) { rows.clear(); break; } // a row must hold >=1 cell
+                rows.push_back(cells);
+            }
+            if(rows.empty()) break; // invalid
+            const int ncols = static_cast<int>(rows[0].size());
+            bool      ok    = true;
+            for(const auto& row : rows)
+                if(static_cast<int>(row.size()) != ncols) { ok = false; break; } // ragged
+            // Every named area must form a single rectangle.
+            if(ok)
+            {
+                for(int r = 0; r < (int)rows.size(); r++)
+                    for(int c = 0; c < ncols; c++)
+                    {
+                        const std::string& nm = rows[r][c];
+                        if(nm == ".") continue;
+                        int rmin = r, rmax = r, cmin = c, cmax = c;
+                        for(int r2 = 0; r2 < (int)rows.size(); r2++)
+                            for(int c2 = 0; c2 < ncols; c2++)
+                                if(rows[r2][c2] == nm)
+                                {
+                                    rmin = std::min(rmin, r2); rmax = std::max(rmax, r2);
+                                    cmin = std::min(cmin, c2); cmax = std::max(cmax, c2);
+                                }
+                        // The area is rectangular iff it fills its bounding box.
+                        for(int r2 = rmin; r2 <= rmax && ok; r2++)
+                            for(int c2 = cmin; c2 <= cmax; c2++)
+                                if(rows[r2][c2] != nm) { ok = false; break; }
+                        if(!ok) break;
+                    }
+            }
+            if(!ok) break;
+            map.rows = static_cast<int>(rows.size());
+            map.cols = ncols;
+            for(const auto& row : rows)
+                for(const auto& cell : row) map.cells.push_back(cell == "." ? "" : cell);
+            add_parsed_property(name, property_value(map, important));
+            break;
+        }
+
+        // grid-area = <grid-line> [ / <grid-line> ]{0..3}  |  a bare <custom-ident>
+        // naming an area (resolved to that area's rectangle at layout time).
+        case _grid_area_:
+        {
+            // Split on '/' into up to 4 longhand groups: row-start / column-start /
+            // row-end / column-end.
+            std::vector<css_token_vector> groups(1);
+            for(const auto& tok : value)
+            {
+                if(tok.type == '/')
+                    groups.emplace_back();
+                else
+                    groups.back().push_back(tok);
+            }
+            if(groups.size() > 4) break;
+            grid_line gls[4];
+            for(size_t gi = 0; gi < groups.size(); gi++)
+            {
+                if(!parse_grid_line_value(groups[gi], gls[gi])) { groups.clear(); break; }
+            }
+            if(groups.empty()) break;
+            // A lone area name (grid-area: foo) sets all four lines to that name,
+            // and all four longhands must be emitted so the end edges resolve.
+            const bool lone_area =
+                groups.size() == 1 && !gls[0].name.empty() && gls[0].span == 0 && gls[0].line == 0;
+            if(lone_area)
+            {
+                gls[1] = gls[2] = gls[3] = gls[0];
+            }
+            add_parsed_property(_grid_row_start_, property_value(gls[0], important));
+            add_parsed_property(_grid_column_start_, property_value(gls[1], important));
+            if(lone_area || groups.size() > 2) add_parsed_property(_grid_row_end_, property_value(gls[2], important));
+            if(lone_area || groups.size() > 3) add_parsed_property(_grid_column_end_, property_value(gls[3], important));
             break;
         }
 

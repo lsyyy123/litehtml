@@ -125,6 +125,12 @@ namespace litehtml
         css_length min;
         css_length max;
         bool       is_minmax = false;
+        // Named lines that appear immediately before this track: [a b] 100px gives
+        // {"a","b"} on that track. Only set on the track that follows the bracket;
+        // a bracket before the *first* track goes on a leading entry instead (see
+        // grid_track_vector leading names handled by the parser via index -1? ) —
+        // see note in parse_grid_track_list.
+        std::vector<std::string> line_names;
     };
     using grid_track_vector = std::vector<grid_track_size>;
 
@@ -133,12 +139,25 @@ namespace litehtml
     //   <integer>       -> explicit line number, 1-based (negative counts from the
     //                      explicit-grid end); stored in `line`
     //   span <integer>  -> `span` tracks
-    // A named <custom-ident> line is not resolved here (named lines are deferred).
+    //   <custom-ident>  -> named line/area, stored in `name` (with `span` when the
+    //                      form is `span <ident>`); resolved against the container's
+    //                      named lines/areas at layout time.
     struct grid_line
     {
-        int  line    = 0;
-        int  span    = 0;
-        bool is_auto = true;
+        int         line    = 0;
+        int         span    = 0;
+        bool        is_auto = true;
+        std::string name; // empty = not a named line
+    };
+
+    // Parsed grid-template-areas: the area name of each explicit cell, in
+    // row-major order, with the explicit grid dimensions. A cell holds "" for the
+    // "." null token. Validity (rectangular areas) is checked at parse time.
+    struct grid_area_map
+    {
+        std::vector<std::string> cells;
+        int                      cols = 0;
+        int                      rows = 0;
     };
 } // namespace litehtml
 

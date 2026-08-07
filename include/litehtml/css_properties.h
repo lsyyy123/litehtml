@@ -103,6 +103,9 @@ namespace litehtml
         grid_track_vector m_grid_template_columns;
         grid_track_vector m_grid_template_rows;
 
+        // CSS Grid: parsed grid-template-areas (empty cells = property not set).
+        grid_area_map m_grid_areas;
+
         // CSS Grid item placement lines (grid-column-start/end, grid-row-start/end).
         grid_line m_grid_column_start;
         grid_line m_grid_column_end;
@@ -128,6 +131,11 @@ namespace litehtml
         void      compute_background(const html_tag* el, const std::shared_ptr<document>& doc);
         void      compute_flex(const html_tag* el, const std::shared_ptr<document>& doc);
         void      compute_grid(const html_tag* el, const std::shared_ptr<document>& doc);
+        // Resolve one named placement line (grid_line::name set) against the
+        // container's named lines (grid-template-columns/rows bracket names) and
+        // named areas (grid-template-areas) into a numeric line index.
+        void      resolve_named_grid_line(grid_line& gl, int explicit_count, bool is_column, bool is_start,
+                                          const grid_track_vector& tracks) const;
         web_color get_color_property(const html_tag* el, string_id name, bool inherited, web_color default_value,
                                      uint_ptr member_offset) const;
         void      snap_border_width(css_length& width, const std::shared_ptr<document>& doc);
@@ -272,6 +280,7 @@ namespace litehtml
 
         const grid_track_vector& get_grid_template_columns() const;
         const grid_track_vector& get_grid_template_rows() const;
+        const grid_area_map&     get_grid_areas() const;
         const grid_line&         get_grid_column_start() const;
         const grid_line&         get_grid_column_end() const;
         const grid_line&         get_grid_row_start() const;
@@ -742,6 +751,11 @@ namespace litehtml
     inline const grid_track_vector& css_properties::get_grid_template_rows() const
     {
         return m_grid_template_rows;
+    }
+
+    inline const grid_area_map& css_properties::get_grid_areas() const
+    {
+        return m_grid_areas;
     }
 
     inline const grid_line& css_properties::get_grid_column_start() const

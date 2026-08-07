@@ -631,6 +631,84 @@ void litehtml::css_properties::compute_flex(const html_tag* el, const document::
     }
 }
 
+// Resolve a named placement line to a numeric 1-based line index. Named lines come
+// from two sources (CSS Grid 7.3): explicit `[name]` markers in the track list, and
+// the implicit `<area>-start` / `<area>-end` lines that grid-template-areas generates
+// for each named area. `name` may itself be `<area>-start`/`<area>-end`, or a bare
+// area name (which resolves to the area's start or end edge per `is_start`).
+void litehtml::css_properties::resolve_named_grid_line(grid_line& gl, int explicit_count, bool is_column,
+                                                       bool is_start, const grid_track_vector& tracks) const
+{
+    if(gl.name.empty()) return;
+    const std::string& name = gl.name;
+
+    auto set_line = [&](int line) {
+        gl.line = line;
+        gl.name.clear();
+        gl.is_auto = false;
+    };
+
+    // 1. Explicit [name] markers in the track list. `[a] 100px` attaches "a" to
+    //    the line *before* that track, so track index t (0-based) yields line t+1.
+    //    A leading `[name]` before the first track lands on track 0 (line 1).
+    for(size_t t = 0; t < tracks.size(); t++)
+    {
+        for(const auto& ln : tracks[t].line_names)
+        {
+            if(ln == name)
+            {
+                set_line(static_cast<int>(t) + 1);
+                return;
+            }
+        }
+    }
+    (void)explicit_count;
+
+    // 2. Area-derived lines. A bare `<custom-ident>` that matches an area name
+    //    places on that area's start (for *-start) or end edge.
+    const grid_area_map& areas = m_grid_areas;
+    if(areas.rows > 0 && areas.cols > 0)
+    {
+        // Find the rectangle occupied by area `name`.
+        std::string area_name = name;
+        bool        want_start = is_start;
+        // Strip a trailing -start/-end from the queried name to get the area name.
+        const std::string sfx_start = "-start", sfx_end = "-end";
+        bool        has_suffix = false;
+        if(area_name.size() > sfx_start.size() && area_name.compare(area_name.size() - sfx_start.size(), std::string::npos, sfx_start) == 0)
+        {
+            area_name  = area_name.substr(0, area_name.size() - sfx_start.size());
+            want_start = true;
+            has_suffix = true;
+        } else if(area_name.size() > sfx_end.size() && area_name.compare(area_name.size() - sfx_end.size(), std::string::npos, sfx_end) == 0)
+        {
+            area_name  = area_name.substr(0, area_name.size() - sfx_end.size());
+            want_start = false;
+            has_suffix = true;
+        }
+        // Locate the area rectangle.
+        int rmin = areas.rows, rmax = -1, cmin = areas.cols, cmax = -1;
+        for(int r = 0; r < areas.rows; r++)
+            for(int c = 0; c < areas.cols; c++)
+                if(areas.cells[r * areas.cols + c] == area_name)
+                {
+                    rmin = std::min(rmin, r); rmax = std::max(rmax, r);
+                    cmin = std::min(cmin, c); cmax = std::max(cmax, c);
+                }
+        if(rmax >= 0)
+        {
+            if(is_column)
+                set_line(want_start ? cmin + 1 : cmax + 2);
+            else
+                set_line(want_start ? rmin + 1 : rmax + 2);
+            return;
+        }
+        (void)has_suffix;
+    }
+    (void)explicit_count;
+    (void)tracks;
+}
+
 void litehtml::css_properties::compute_grid(const html_tag* el, const document::ptr& doc)
 {
     if(m_display == display_grid || m_display == display_inline_grid)
@@ -657,6 +735,9 @@ void litehtml::css_properties::compute_grid(const html_tag* el, const document::
             el->get_property<int>(_align_content_, false, flex_align_content_normal, offset(m_flex_align_content)));
         m_grid_justify_items = static_cast<flex_align_items>(
             el->get_property<int>(_justify_items_, false, flex_align_items_normal, offset(m_grid_justify_items)));
+        // grid-template-areas: empty map = none / unset.
+        m_grid_areas = el->get_property<grid_area_map>(_grid_template_areas_, false,
+                                                       grid_area_map(), offset(m_grid_areas));
     }
     auto parent = el->parent();
     if(parent && (parent->css().m_display == display_grid || parent->css().m_display == display_inline_grid))
@@ -689,6 +770,25 @@ void litehtml::css_properties::compute_grid(const html_tag* el, const document::
         // compute_flex for all elements).
         m_grid_justify_self = static_cast<flex_align_items>(
             el->get_property<int>(_justify_self_, false, flex_align_items_auto, offset(m_grid_justify_self)));
+
+        // Resolve any named placement lines against the container's named lines
+        // (bracket names) and named areas. The container's css holds the track
+        // lists and the area map. Resolution mutates the item's grid_line in
+        // place, turning a name into a numeric 1-based line.
+        const css_properties& pc = parent->css();
+        const grid_track_vector& cols_t = pc.m_grid_template_columns;
+        const grid_track_vector& rows_t = pc.m_grid_template_rows;
+        int ecols = static_cast<int>(cols_t.size());
+        int erows = static_cast<int>(rows_t.size());
+        if(ecols <= 0) ecols = 1;
+        if(erows <= 0) erows = 1;
+        // The area map lives on the container; mirror it so resolve_* can read it
+        // via m_grid_areas without depending on evaluation order.
+        m_grid_areas = pc.m_grid_areas;
+        resolve_named_grid_line(m_grid_column_start, ecols, true, true, cols_t);
+        resolve_named_grid_line(m_grid_column_end, ecols, true, false, cols_t);
+        resolve_named_grid_line(m_grid_row_start, erows, false, true, rows_t);
+        resolve_named_grid_line(m_grid_row_end, erows, false, false, rows_t);
     }
 }
 
