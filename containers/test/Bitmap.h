@@ -1,6 +1,23 @@
 #pragma once
 #include <litehtml.h>
+#include <algorithm>
+#include <map>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 using namespace litehtml;
+// This litehtml version keeps std names inside std::; the test container code
+// uses them unqualified, so pull them into scope here (test tool only, not the
+// litehtml core).
+using std::abs;
+using std::map;
+using std::max;
+using std::min;
+using std::optional;
+using std::string;
+using std::swap;
+using std::vector;
 using rect = position;
 namespace canvas_ity
 {

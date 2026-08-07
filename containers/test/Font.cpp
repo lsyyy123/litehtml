@@ -163,7 +163,7 @@ void RasterFont::load(string filename)
     auto parse_glyph = [&](int ch) {
         int     glyph_width = (int) trim(lines[i]).size();
         Bitmap& glyph = glyphs[ch] = Bitmap(glyph_width, (int) height, transparent);
-        for(int y = 0; i < (int) lines.size() && y < height; i++, y++)
+        for(int y = 0; i < (int) lines.size() && y < (int) height; i++, y++)
         {
             string line = trim(lines[i]);
             for(int x = 0; x < min((int) line.size(), glyph_width); x++)
