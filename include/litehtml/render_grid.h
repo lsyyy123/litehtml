@@ -28,10 +28,11 @@ namespace litehtml
         // the container content-box width (the % base and fr free-space source)
         // when `available_definite`; otherwise (shrink-to-fit) percentage/fr/auto
         // tracks are content sized. Auto/min/max-content tracks are measured from
-        // the items placed in that column.
+        // the items placed in that column. `col_gap` is the resolved column-gap;
+        // it is subtracted from the free space distributed to fr tracks.
         std::vector<pixel_t> resolve_columns(const length_vector& tracks, pixel_t available, bool available_definite,
                                              int item_count, const containing_block_context& self_size,
-                                             formatting_context* fmt_ctx);
+                                             formatting_context* fmt_ctx, pixel_t col_gap);
 
       public:
         explicit render_item_grid(std::shared_ptr<element> src_el) :

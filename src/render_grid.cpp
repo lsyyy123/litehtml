@@ -10,7 +10,7 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
                                                                            pixel_t available, bool available_definite,
                                                                            int item_count,
                                                                            const containing_block_context& self_size,
-                                                                           formatting_context* fmt_ctx)
+                                                                           formatting_context* fmt_ctx, pixel_t col_gap)
 {
     // Collect in-flow items (document order == auto-placement order).
     std::vector<std::shared_ptr<render_item>> items;
@@ -87,6 +87,8 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
     }
 
     // Distribute the remaining free space across fr tracks (definite width only).
+    // The gaps between columns consume container width too, so they are removed
+    // from the free space before sizing fr tracks.
     if(total_fr > 0.0f)
     {
         pixel_t used = 0_px;
@@ -94,6 +96,7 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
         {
             if(!is_auto[c] && tracks[c].units() != css_units_fr) used += col_w[c];
         }
+        if(ncols > 1) used += pixel_t(ncols - 1) * col_gap;
         pixel_t free_space = available - used;
         if(free_space < 0_px) free_space = 0_px;
         for(int c = 0; c < ncols; c++)
@@ -152,13 +155,18 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     const length_vector& cols_t = css().get_grid_template_columns();
     const length_vector& rows_t = css().get_grid_template_rows();
 
-    std::vector<pixel_t> col_w =
-        resolve_columns(cols_t, content_width, width_definite, static_cast<int>(items.size()), self_size, fmt_ctx);
+    // column-gap resolves its percentage against the container's inline size
+    // (content-box width). row-gap (below) resolves against the block size.
+    const pixel_t col_gap = css().get_column_gap().calc_percent(content_width);
+
+    std::vector<pixel_t> col_w = resolve_columns(cols_t, content_width, width_definite,
+                                                 static_cast<int>(items.size()), self_size, fmt_ctx, col_gap);
     const int ncols = static_cast<int>(col_w.size());
     const int nrows = (static_cast<int>(items.size()) + ncols - 1) / ncols;
 
     // The grid's content-box width: the definite containing-block width, or the
-    // sum of the content-sized columns when shrink-to-fit.
+    // sum of the content-sized columns (plus the gaps between them) when
+    // shrink-to-fit.
     pixel_t grid_width = content_width;
     if(!width_definite)
     {
@@ -167,6 +175,7 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
         {
             grid_width += col_w[c];
         }
+        if(ncols > 1) grid_width += pixel_t(ncols - 1) * col_gap;
     }
     ret_width = grid_width;
 
@@ -182,6 +191,10 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     // height is indefinite the track behaves as auto (CSS Grid 5.1.1).
     const bool    height_definite = (self_size.height.type == containing_block_context::cbc_value_type_absolute);
     const pixel_t height_base     = height_definite ? self_size.height.value : 0_px;
+
+    // row-gap resolves its percentage against the container's block size
+    // (height); an indefinite height makes the percentage gap behave as 0.
+    const pixel_t row_gap = css().get_row_gap().calc_percent(height_base);
 
     for(int r = 0; r < nrows; r++)
     {
@@ -204,15 +217,18 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     // Pass 2: place items into their grid areas. Only auto-height, non-replaced
     // items are stretched to the row height (align-self: stretch); items with an
     // explicit height and replaced items keep their own size.
+    // Track offset arrays include the gap that precedes each track (no gap
+    // before the first one), so col_x[c]/row_y[r] is the content origin of that
+    // track and the trailing entry is the total grid content size.
     std::vector<pixel_t> col_x(ncols + 1, 0_px);
     for(int c = 0; c < ncols; c++)
     {
-        col_x[c + 1] = col_x[c] + col_w[c];
+        col_x[c + 1] = col_x[c] + col_w[c] + col_gap;
     }
     std::vector<pixel_t> row_y(nrows + 1, 0_px);
     for(int r = 0; r < nrows; r++)
     {
-        row_y[r + 1] = row_y[r] + row_h[r];
+        row_y[r + 1] = row_y[r] + row_h[r] + row_gap;
     }
 
     for(int i = 0; i < static_cast<int>(items.size()); i++)
@@ -235,8 +251,10 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
         el->pos().y = row_y[r] + el->content_offset_top();
     }
 
-    m_pos.width  = grid_width;
-    m_pos.height = row_y[nrows];
+    m_pos.width = grid_width;
+    // row_y[nrows] carries a trailing gap after the last row; the container's
+    // content height has only (nrows-1) gaps between the rows.
+    m_pos.height = row_y[nrows] - (nrows > 0 ? row_gap : 0_px);
 
     m_pos.move_to(x, y);
     m_pos.x += content_offset_left();
