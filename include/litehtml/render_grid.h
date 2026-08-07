@@ -29,8 +29,12 @@ namespace litehtml
     //
     // Not yet supported (honest fallback, see plan C19): grid-auto-columns/rows
     // track sizing, subgrid (Level 2), and last-baseline / writing-mode-aware
-    // self-start/self-end. Unresolvable items fall back to content/auto sizing
-    // rather than mocked geometry.
+    // self-start/self-end. `grid-template-*: subgrid` fails to parse as a track
+    // list, so the axis falls back to automatic (auto) tracks -- a degraded but
+    // honest layout, never mocked track sharing. True subgrid requires the child
+    // grid to inherit the parent's resolved tracks, which the single-pass render
+    // contract cannot sequence for the block axis (row heights are measured after
+    // the child renders); deferred rather than faked.
     class render_item_grid : public render_item_block
     {
         // A placed grid item's cell range (0-based track indices).
