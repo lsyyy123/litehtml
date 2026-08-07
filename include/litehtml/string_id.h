@@ -88,7 +88,7 @@ namespace litehtml
         _border_collapse_, _text_transform_,
 
         _flex_, _flex_flow_, _flex_direction_, _flex_wrap_, _justify_content_, _align_items_, _align_content_,
-        _align_self_, _flex_grow_, _flex_shrink_, _flex_basis_,
+        _align_self_, _flex_grow_, _flex_shrink_, _flex_basis_, _justify_items_, _justify_self_,
 
         _gap_, _row_gap_, _column_gap_,
 

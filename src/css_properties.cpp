@@ -644,6 +644,19 @@ void litehtml::css_properties::compute_grid(const html_tag* el, const document::
         int flow                 = el->get_property<int>(_grid_auto_flow_, false, 0, offset(m_grid_auto_flow));
         m_grid_auto_flow         = (flow & 1) ? grid_auto_flow_column : grid_auto_flow_row;
         m_grid_auto_flow_dense   = (flow & 2) != 0;
+
+        // CSS Box Alignment on the grid container. align-items / justify-content /
+        // align-content share their storage with flex (compute_flex only fills them
+        // for flex boxes, so grid containers compute them here). justify-items has
+        // no flex counterpart and uses the grid-specific member.
+        m_flex_justify_content = static_cast<flex_justify_content>(el->get_property<int>(
+            _justify_content_, false, flex_justify_content_normal, offset(m_flex_justify_content)));
+        m_flex_align_items     = static_cast<flex_align_items>(
+            el->get_property<int>(_align_items_, false, flex_align_items_normal, offset(m_flex_align_items)));
+        m_flex_align_content = static_cast<flex_align_content>(
+            el->get_property<int>(_align_content_, false, flex_align_content_normal, offset(m_flex_align_content)));
+        m_grid_justify_items = static_cast<flex_align_items>(
+            el->get_property<int>(_justify_items_, false, flex_align_items_normal, offset(m_grid_justify_items)));
     }
     auto parent = el->parent();
     if(parent && (parent->css().m_display == display_grid || parent->css().m_display == display_inline_grid))
@@ -672,6 +685,10 @@ void litehtml::css_properties::compute_grid(const html_tag* el, const document::
                                                           offset(m_grid_row_start));
         m_grid_row_end      = el->get_property<grid_line>(_grid_row_end_, false, grid_line(),
                                                           offset(m_grid_row_end));
+        // justify-self on the grid item (align-self is computed unconditionally in
+        // compute_flex for all elements).
+        m_grid_justify_self = static_cast<flex_align_items>(
+            el->get_property<int>(_justify_self_, false, flex_align_items_auto, offset(m_grid_justify_self)));
     }
 }
 

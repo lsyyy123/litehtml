@@ -15,13 +15,17 @@ namespace litehtml
     //   * Explicit line-based item placement (grid-column/row start/end, span)
     //     and automatic placement with grid-auto-flow (row/column, sparse/dense),
     //     growing implicit tracks.
-    //   * Auto rows sized to the tallest item in the row; items stretch to fill
-    //     their grid area (the default align/justify behavior).
+    //   * Auto rows sized to the tallest item in the row.
+    //   * CSS Box Alignment: justify-self/align-self (start/center/end/self-*/
+    //     flex-*/stretch, with safe/unsafe) position an item within its grid
+    //     area; justify-content/align-content (start/end/center/space-between/
+    //     around/evenly/stretch) distribute the tracks within the container;
+    //     first-baseline alignment shares a row baseline among baseline items.
     //
     // Not yet supported (honest fallback, see plan C19): named lines/areas,
-    // grid-auto-columns/rows track sizing, subgrid, and the align/justify
-    // properties. Unresolvable items fall back to content/auto sizing rather
-    // than mocked geometry.
+    // grid-auto-columns/rows track sizing, subgrid, and last-baseline /
+    // writing-mode-aware self-start/self-end. Unresolvable items fall back to
+    // content/auto sizing rather than mocked geometry.
     class render_item_grid : public render_item_block
     {
         // A placed grid item's cell range (0-based track indices).
@@ -58,7 +62,33 @@ namespace litehtml
                                              const std::vector<std::shared_ptr<render_item>>& items,
                                              const std::vector<grid_item_area>& areas, int ncols,
                                              const containing_block_context& self_size,
-                                             formatting_context* fmt_ctx, pixel_t col_gap);
+                                             formatting_context* fmt_ctx, pixel_t col_gap,
+                                             std::vector<char>* out_is_auto = nullptr);
+
+        // Content distribution for one axis (justify-content for inline /
+        // align-content for block). Given the container content size and the
+        // resolved track sizes, mutates `tracks` when stretching and returns the
+        // start offset plus any extra inter-track spacing (space-between/around/
+        // evenly) to add on top of the base gap. The vector reflects any
+        // stretch-grown track sizes on return.
+        void distribute_tracks(flex_justify_content dist, pixel_t container_size, pixel_t base_gap,
+                               std::vector<pixel_t>& tracks, const std::vector<char>& is_auto, pixel_t& out_offset,
+                               pixel_t& out_extra_gap);
+
+        // Compute a grid item's effective self alignment on one axis, resolving
+        // `auto`/`normal` against the container's items value. Returns a base
+        // flex_align_items value with safe/unsafe and first/last flags preserved
+        // in the high bits.
+        int effective_self_align(const std::shared_ptr<render_item>& item, bool inline_axis);
+
+        // Max-content width of an item (for non-stretch justify-self, which
+        // shrink-wraps the item instead of filling the area). Cached because
+        // it is consulted in both the row-measuring pass and final placement.
+        pixel_t natural_item_width(const std::shared_ptr<render_item>& item,
+                                   const containing_block_context& self_size, formatting_context* fmt_ctx);
+
+        // natural_width cache, parallel to the in-flow items of one render pass.
+        std::vector<pixel_t> m_natw;
 
       public:
         explicit render_item_grid(std::shared_ptr<element> src_el) :

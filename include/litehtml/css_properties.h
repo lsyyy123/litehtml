@@ -112,6 +112,14 @@ namespace litehtml
         grid_auto_flow m_grid_auto_flow       = grid_auto_flow_row;
         bool           m_grid_auto_flow_dense = false;
 
+        // CSS Box Alignment for grid. align-items/justify-content/align-content
+        // reuse the m_flex_* members (computed for grid containers too, see
+        // compute_grid). justify-items (container) and justify-self (item) have
+        // no flex counterpart, so they are stored here. The value set matches
+        // align-self (flex_align_items), including first/last/safe/unsafe flags.
+        flex_align_items m_grid_justify_items = flex_align_items_normal;
+        flex_align_items m_grid_justify_self  = flex_align_items_auto;
+
         caption_side m_caption_side = caption_side_top;
 
         int m_order = 0;
@@ -270,6 +278,8 @@ namespace litehtml
         const grid_line&         get_grid_row_end() const;
         grid_auto_flow           get_grid_auto_flow() const;
         bool                     get_grid_auto_flow_dense() const;
+        flex_align_items         get_grid_justify_items() const;
+        flex_align_items         get_grid_justify_self() const;
 
         int  get_order() const;
         void set_order(int order);
@@ -757,6 +767,14 @@ namespace litehtml
     inline bool css_properties::get_grid_auto_flow_dense() const
     {
         return m_grid_auto_flow_dense;
+    }
+    inline flex_align_items css_properties::get_grid_justify_items() const
+    {
+        return m_grid_justify_items;
+    }
+    inline flex_align_items css_properties::get_grid_justify_self() const
+    {
+        return m_grid_justify_self;
     }
 
     inline caption_side css_properties::get_caption_side() const

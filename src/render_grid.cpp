@@ -6,12 +6,108 @@
 #include <algorithm>
 #include <vector>
 
+// Strip the overflow/baseline qualifier bits to get the base alignment value.
+static int base_align(int a)
+{
+    return a & 0xFF;
+}
+
+int litehtml::render_item_grid::effective_self_align(const std::shared_ptr<render_item>& item, bool inline_axis)
+{
+    int flags;
+    int base;
+    if(inline_axis)
+    {
+        int v  = static_cast<int>(item->css().get_grid_justify_self());
+        flags  = v & ~0xFF;
+        base   = base_align(v);
+        if(base == flex_align_items_auto) base = base_align(static_cast<int>(css().get_grid_justify_items()));
+    } else
+    {
+        int v  = static_cast<int>(item->css().get_flex_align_self());
+        flags  = v & ~0xFF;
+        base   = base_align(v);
+        if(base == flex_align_items_auto) base = base_align(static_cast<int>(css().get_flex_align_items()));
+    }
+    // On grid items `normal` behaves as `stretch` (except on boxes with an
+    // intrinsic aspect ratio or intrinsic size, which we approximate as
+    // stretch here too; replaced elements opt out of stretch in the caller).
+    if(base == flex_align_items_auto || base == flex_align_items_normal) base = flex_align_items_stretch;
+    return base | flags;
+}
+
+litehtml::pixel_t litehtml::render_item_grid::natural_item_width(const std::shared_ptr<render_item>& item,
+                                                                 const containing_block_context& self_size,
+                                                                 formatting_context*             fmt_ctx)
+{
+    pixel_t w = item->render(0_px, 0_px,
+                             self_size.new_width(self_size.render_width, containing_block_context::size_mode_content),
+                             fmt_ctx)
+                    .natural_width;
+    return w + item->content_offset_width();
+}
+
+void litehtml::render_item_grid::distribute_tracks(flex_justify_content dist, pixel_t container_size, pixel_t base_gap,
+                                                   std::vector<pixel_t>& tracks, const std::vector<char>& is_auto,
+                                                   pixel_t& out_offset, pixel_t& out_extra_gap)
+{
+    out_offset    = 0_px;
+    out_extra_gap = 0_px;
+    const int n   = static_cast<int>(tracks.size());
+    if(n == 0) return;
+
+    pixel_t total = n > 1 ? pixel_t(n - 1) * base_gap : 0_px;
+    for(auto t : tracks) total += t;
+    pixel_t free_space = container_size - total;
+    if(free_space < 0_px) free_space = 0_px;
+
+    switch(dist)
+    {
+    case flex_justify_content_end:
+    case flex_justify_content_flex_end:
+    case flex_justify_content_right:
+        out_offset = free_space;
+        break;
+    case flex_justify_content_center:
+        out_offset = free_space / 2_px;
+        break;
+    case flex_justify_content_space_between:
+        if(n > 1) out_extra_gap = free_space / pixel_t(n - 1);
+        break;
+    case flex_justify_content_space_around:
+        out_extra_gap = free_space / pixel_t(n);
+        out_offset    = out_extra_gap / 2_px;
+        break;
+    case flex_justify_content_space_evenly:
+        out_extra_gap = free_space / pixel_t(n + 1);
+        out_offset    = out_extra_gap;
+        break;
+    case flex_justify_content_stretch:
+    {
+        // Grow the auto tracks to consume the free space (CSS Grid 12.4).
+        int auto_count = 0;
+        for(int i = 0; i < n; i++)
+            if(is_auto[i]) auto_count++;
+        if(auto_count > 0)
+        {
+            pixel_t add = free_space / pixel_t(auto_count);
+            for(int i = 0; i < n; i++)
+                if(is_auto[i]) tracks[i] += add;
+        }
+        break;
+    }
+    default: // normal / start / flex-start / left
+        break;
+    }
+}
+
 std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const grid_track_vector& tracks,
                                                                            pixel_t available, bool available_definite,
                                                                            const std::vector<std::shared_ptr<render_item>>& items,
                                                                            const std::vector<grid_item_area>& areas, int ncols,
                                                                            const containing_block_context& self_size,
-                                                                           formatting_context* fmt_ctx, pixel_t col_gap)
+                                                                           formatting_context* fmt_ctx, pixel_t col_gap,
+                                                                           std::vector<char>* out_is_auto)
 {
     const auto doc   = src_el()->get_document();
     const auto& fmet = css().get_font_metrics();
@@ -132,6 +228,11 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
     for(int c = 0; c < ncols; c++)
     {
         if(col_w[c] < floor_px[c]) col_w[c] = floor_px[c];
+    }
+
+    if(out_is_auto)
+    {
+        out_is_auto->assign(is_auto.begin(), is_auto.end());
     }
 
     return col_w;
@@ -354,8 +455,19 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     std::vector<grid_item_area> areas = place_items(items, static_cast<int>(cols_t.size()),
                                                     static_cast<int>(rows_t.size()), ncols, nrows);
 
+    std::vector<char>    col_is_auto;
     std::vector<pixel_t> col_w = resolve_columns(cols_t, content_width, width_definite, items, areas,
-                                                 ncols, self_size, fmt_ctx, col_gap);
+                                                 ncols, self_size, fmt_ctx, col_gap, &col_is_auto);
+
+    // justify-content distributes the free inline space among/around the tracks
+    // (only meaningful with a definite container width; otherwise the container
+    // shrink-wraps the tracks and there is no free space).
+    pixel_t jc_off = 0_px, jc_extra = 0_px;
+    if(width_definite)
+    {
+        distribute_tracks(css().get_flex_justify_content(), content_width, col_gap, col_w, col_is_auto, jc_off,
+                          jc_extra);
+    }
 
     // The grid's content-box width: the definite containing-block width, or the
     // sum of the content-sized columns (plus the gaps between them) when
@@ -431,61 +543,179 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
         return h;
     };
 
-    for(int i = 0; i < static_cast<int>(items.size()); i++)
+    // Precompute effective self alignment per item (justify-self = inline axis,
+    // align-self = block axis), resolving auto/normal against the container.
+    const int nitems = static_cast<int>(items.size());
+    std::vector<int> eff_js(nitems), eff_as(nitems);
+    for(int i = 0; i < nitems; i++)
     {
-        const int c = areas[i].col_start;
+        eff_js[i] = effective_self_align(items[i], true);
+        eff_as[i] = effective_self_align(items[i], false);
+    }
+
+    // The inline content-box size an item is laid out at: the full span when
+    // justify-self is stretch, otherwise the item shrink-wraps (explicit width
+    // respected; auto width becomes the max-content width). natural_width is
+    // cached because it is used in both passes.
+    m_natw.assign(nitems, -1_px);
+    auto inline_size = [&](int i) -> pixel_t {
+        const auto& el   = items[i];
+        pixel_t     span = span_w(areas[i].col_start, areas[i].col_span);
+        if(base_align(eff_js[i]) == flex_align_items_stretch) return span;
+        pixel_t w;
+        if(el->css().get_width().is_predefined())
+        {
+            if(m_natw[i] < 0_px) m_natw[i] = natural_item_width(el, self_size, fmt_ctx);
+            w = m_natw[i];
+        } else
+        {
+            w = el->css().get_width().calc_percent(span) + el->content_offset_width();
+        }
+        // An item never shrink-wraps to less than 0; it may overflow its area.
+        if(w < 0_px) w = 0_px;
+        return w;
+    };
+
+    for(int i = 0; i < nitems; i++)
+    {
         const int r = areas[i].row_start;
         // A multi-span item's height is attributed to its first row (spanning
         // distribution across rows is a known C19 simplification).
-        items[i]->render(0_px, 0_px,
-                         self_size.new_width(span_w(c, areas[i].col_span) - items[i]->content_offset_width()),
+        items[i]->render(0_px, 0_px, self_size.new_width(inline_size(i) - items[i]->content_offset_width()),
                          fmt_ctx);
         if(!row_fixed[r] && items[i]->bottom() > row_h[r]) row_h[r] = items[i]->bottom();
     }
 
-    // Pass 2: place items into their grid areas. Only auto-height, non-replaced
-    // items are stretched to the row height (align-self: stretch); items with an
-    // explicit height and replaced items keep their own size.
-    // Track offset arrays include the gap that precedes each track (no gap
-    // before the first one), so col_x[c]/row_y[r] is the content origin of that
-    // track and the trailing entry is the total grid content size.
-    std::vector<pixel_t> col_x(ncols + 1, 0_px);
-    for(int c = 0; c < ncols; c++)
+    // align-content distributes the free block space among/around the rows.
+    // The container's block size is definite only when its height is definite;
+    // otherwise rows are packed at the content height and there is no free space.
+    std::vector<char> row_is_auto(nrows, 1);
+    for(int r = 0; r < nrows; r++) row_is_auto[r] = row_fixed[r] ? 0 : 1;
+    pixel_t container_h     = height_definite ? height_base : 0_px;
+    pixel_t ac_off = 0_px, ac_extra = 0_px;
+    if(height_definite)
     {
-        col_x[c + 1] = col_x[c] + col_w[c] + col_gap;
-    }
-    std::vector<pixel_t> row_y(nrows + 1, 0_px);
-    for(int r = 0; r < nrows; r++)
-    {
-        row_y[r + 1] = row_y[r] + row_h[r] + row_gap;
+        int ac = base_align(static_cast<int>(css().get_flex_align_content()));
+        distribute_tracks(static_cast<flex_justify_content>(ac), container_h, row_gap, row_h, row_is_auto, ac_off,
+                          ac_extra);
     }
 
-    for(int i = 0; i < static_cast<int>(items.size()); i++)
+    // Pass 2: place items into their grid areas. Track offset arrays carry the
+    // content-distribution offset and any extra inter-track spacing, so
+    // col_x[c]/row_y[r] is the content origin of that track.
+    std::vector<pixel_t> col_x(ncols + 1, 0_px);
+    col_x[0] = jc_off;
+    for(int c = 0; c < ncols; c++)
+    {
+        col_x[c + 1] = col_x[c] + col_w[c] + col_gap + jc_extra;
+    }
+    std::vector<pixel_t> row_y(nrows + 1, 0_px);
+    row_y[0] = ac_off;
+    for(int r = 0; r < nrows; r++)
+    {
+        row_y[r + 1] = row_y[r] + row_h[r] + row_gap + ac_extra;
+    }
+
+    // Baseline alignment (align-self: [first] baseline). For each row, the items
+    // that opt into baseline alignment establish a shared first-baseline: the row
+    // baseline sits at max(baseline) from the track top, and the track grows to
+    // fit the deepest descent below it. Non-baseline items are unaffected.
+    std::vector<pixel_t> row_baseline(nrows, -1_px);
+    for(int i = 0; i < nitems; i++)
+    {
+        if(base_align(eff_as[i]) != flex_align_items_baseline) continue;
+        const int r = areas[i].row_start;
+        pixel_t   b = items[i]->get_first_baseline();
+        if(b < 0_px) b = 0_px;
+        if(row_baseline[r] < 0_px || b > row_baseline[r]) row_baseline[r] = b;
+    }
+    for(int i = 0; i < nitems; i++)
+    {
+        if(base_align(eff_as[i]) != flex_align_items_baseline) continue;
+        const int r = areas[i].row_start;
+        if(row_baseline[r] < 0_px) continue;
+        pixel_t   b   = items[i]->get_first_baseline();
+        if(b < 0_px) b = 0_px;
+        // Space the item needs below the shared baseline = its descent.
+        pixel_t   need = row_baseline[r] + (items[i]->height() - b);
+        if(need > row_h[r])
+        {
+            pixel_t grow = need - row_h[r];
+            row_h[r] = need;
+            // Shift every later row down by the grown amount.
+            for(int rr = r + 1; rr <= nrows; rr++) row_y[rr] += grow;
+        }
+    }
+
+    for(int i = 0; i < nitems; i++)
     {
         const int c        = areas[i].col_start;
         const int r        = areas[i].row_start;
         auto&     el       = items[i];
         bool      h_auto   = el->css().get_height().is_predefined();
         bool      replaced = el->src_el()->is_replaced();
-        if(h_auto && !replaced)
+        const int js       = base_align(eff_js[i]);
+        const int as_      = base_align(eff_as[i]);
+
+        // Block axis (align-self): stretch an auto-height, non-replaced item to
+        // its area height; otherwise keep its natural height and offset it.
+        // `area_w` is the area's inline size (the alignment reference); `iw` is
+        // the item's own layout width (the span when stretch, else shrink-wrapped).
+        const pixel_t area_w = span_w(c, areas[i].col_span);
+        const pixel_t iw     = inline_size(i);
+        const pixel_t ih     = span_h(r, areas[i].row_span);
+        if(h_auto && !replaced && as_ == flex_align_items_stretch)
         {
-            const pixel_t iw = span_w(c, areas[i].col_span);
-            const pixel_t ih = span_h(r, areas[i].row_span);
-            auto          cb = self_size.new_width_height(iw - el->content_offset_width(),
-                                                          ih - el->content_offset_height(),
-                                                          containing_block_context::size_mode_exact_width |
-                                                              containing_block_context::size_mode_exact_height);
+            auto cb = self_size.new_width_height(iw - el->content_offset_width(),
+                                                 ih - el->content_offset_height(),
+                                                 containing_block_context::size_mode_exact_width |
+                                                     containing_block_context::size_mode_exact_height);
             el->render(0_px, 0_px, cb, fmt_ctx);
             el->pos().height = ih - el->content_offset_height();
+        } else if(js != flex_align_items_stretch)
+        {
+            // Non-stretch justify-self: re-lay out at the shrink-wrapped width.
+            el->render(0_px, 0_px, self_size.new_width(iw - el->content_offset_width()), fmt_ctx);
         }
-        el->pos().x = col_x[c] + el->content_offset_left();
-        el->pos().y = row_y[r] + el->content_offset_top();
+
+        const pixel_t item_w = el->width();
+        const pixel_t item_h = el->height();
+
+        // Inline axis (justify-self) offset within the area.
+        pixel_t dx = 0_px;
+        if(js == flex_align_items_center) dx = (area_w - item_w) / 2_px;
+        else if(js == flex_align_items_end || js == flex_align_items_self_end || js == flex_align_items_flex_end)
+            dx = area_w - item_w;
+        // start / self-start / flex-start / stretch -> dx = 0 (stretch already
+        // sized the item to the span).
+
+        // Block axis (align-self) offset within the area. Baseline aligns the
+        // item's first baseline to the row's shared baseline.
+        pixel_t dy = 0_px;
+        if(as_ == flex_align_items_center) dy = (ih - item_h) / 2_px;
+        else if(as_ == flex_align_items_end || as_ == flex_align_items_self_end || as_ == flex_align_items_flex_end)
+            dy = ih - item_h;
+        else if(as_ == flex_align_items_baseline && r < static_cast<int>(row_baseline.size()) &&
+                row_baseline[r] >= 0_px)
+        {
+            pixel_t b = el->get_first_baseline();
+            if(b < 0_px) b = 0_px;
+            dy = row_baseline[r] - b;
+            if(dy < 0_px) dy = 0_px;
+        }
+
+        el->pos().x = col_x[c] + dx + el->content_offset_left();
+        el->pos().y = row_y[r] + dy + el->content_offset_top();
     }
 
     m_pos.width = grid_width;
-    // row_y[nrows] carries a trailing gap after the last row; the container's
-    // content height has only (nrows-1) gaps between the rows.
-    m_pos.height = row_y[nrows] - (nrows > 0 ? row_gap : 0_px);
+    // row_y[nrows] - row_y[0] is the tracks' total block size plus every inter-row
+    // gap and align-content extra spacing; the container's content height drops
+    // the single trailing gap after the last row (and the content-distribution
+    // offset at row_y[0] is not part of the content size).
+    pixel_t content_h = row_y[nrows] - row_y[0] - (nrows > 0 ? (row_gap + ac_extra) : 0_px);
+    if(height_definite && content_h < height_base) content_h = height_base;
+    m_pos.height = content_h;
 
     m_pos.move_to(x, y);
     m_pos.x += content_offset_left();

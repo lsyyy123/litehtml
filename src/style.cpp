@@ -65,6 +65,8 @@ namespace litehtml
         {_align_content_,          flex_align_content_strings          },
         {_align_items_,            flex_align_items_strings            },
         {_align_self_,             flex_align_items_strings            },
+        {_justify_items_,          flex_align_items_strings            },
+        {_justify_self_,           flex_align_items_strings            },
 
         {_caption_side_,           caption_side_strings                },
 
@@ -859,6 +861,8 @@ namespace litehtml
 
         case _align_items_:
         case _align_self_:
+        case _justify_items_:
+        case _justify_self_:
             parse_align_self(name, value, important);
             break;
 
@@ -2067,7 +2071,9 @@ namespace litehtml
 
         std::string a = tokens[0].ident();
 
-        if(name == _align_items_ && a == "auto")
+        // align-items / justify-items don't take `auto` (that's align-self /
+        // justify-self only); their initial value is `normal`.
+        if((name == _align_items_ || name == _justify_items_) && a == "auto")
         {
             return;
         }
