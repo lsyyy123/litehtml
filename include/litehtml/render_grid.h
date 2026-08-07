@@ -21,11 +21,16 @@ namespace litehtml
     //     area; justify-content/align-content (start/end/center/space-between/
     //     around/evenly/stretch) distribute the tracks within the container;
     //     first-baseline alignment shares a row baseline among baseline items.
+    //   * Named lines ([name] before a track) and grid-template-areas, resolved
+    //     to numeric lines at compute time (incl. area-derived -start/-end).
+    //   * Two-phase percentage resolution for indefinite (shrink-to-fit) inline
+    //     axis: % tracks first auto-size for the intrinsic width, then resolve
+    //     against it (CSS Grid 5.1.1).
     //
-    // Not yet supported (honest fallback, see plan C19): named lines/areas,
-    // grid-auto-columns/rows track sizing, subgrid, and last-baseline /
-    // writing-mode-aware self-start/self-end. Unresolvable items fall back to
-    // content/auto sizing rather than mocked geometry.
+    // Not yet supported (honest fallback, see plan C19): grid-auto-columns/rows
+    // track sizing, subgrid (Level 2), and last-baseline / writing-mode-aware
+    // self-start/self-end. Unresolvable items fall back to content/auto sizing
+    // rather than mocked geometry.
     class render_item_grid : public render_item_block
     {
         // A placed grid item's cell range (0-based track indices).

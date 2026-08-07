@@ -459,6 +459,29 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     std::vector<pixel_t> col_w = resolve_columns(cols_t, content_width, width_definite, items, areas,
                                                  ncols, self_size, fmt_ctx, col_gap, &col_is_auto);
 
+    // Two-phase percentage resolution for an indefinite (shrink-to-fit) axis.
+    // Phase 1 above treated % tracks as auto to get the intrinsic width. If any
+    // explicit column is a percentage, phase 2 re-resolves those tracks against
+    // that intrinsic width (CSS Grid 5.1.1: % against an indefinite size first
+    // computes the intrinsic size, then resolves the percentage against it).
+    if(!width_definite)
+    {
+        bool has_pct_col = false;
+        for(const auto& t : cols_t)
+        {
+            const css_length& eff = t.is_minmax ? t.max : t.min;
+            if(!eff.is_predefined() && eff.units() == css_units_percentage) { has_pct_col = true; break; }
+        }
+        if(has_pct_col)
+        {
+            pixel_t intrinsic = 0_px;
+            for(int c = 0; c < ncols; c++) intrinsic += col_w[c];
+            if(ncols > 1) intrinsic += pixel_t(ncols - 1) * col_gap;
+            col_w = resolve_columns(cols_t, intrinsic, /*available_definite=*/true, items, areas,
+                                    ncols, self_size, fmt_ctx, col_gap, &col_is_auto);
+        }
+    }
+
     // justify-content distributes the free inline space among/around the tracks
     // (only meaningful with a definite container width; otherwise the container
     // shrink-wraps the tracks and there is no free space).
