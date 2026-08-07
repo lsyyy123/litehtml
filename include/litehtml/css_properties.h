@@ -93,6 +93,15 @@ namespace litehtml
         flex_align_items     m_flex_align_self      = flex_align_items_auto;
         flex_align_content   m_flex_align_content   = flex_align_content_stretch;
 
+        css_length           m_row_gap;
+        css_length           m_column_gap;
+
+        // CSS Grid: explicit track lists for grid-template-columns/rows.
+        // Each entry is a css_length: absolute unit / percentage / fr, or a
+        // predefined value (auto/min-content/max-content). Empty vector = none.
+        length_vector m_grid_template_columns;
+        length_vector m_grid_template_rows;
+
         caption_side m_caption_side = caption_side_top;
 
         int m_order = 0;
@@ -100,6 +109,7 @@ namespace litehtml
         void      compute_font(const html_tag* el, const std::shared_ptr<document>& doc);
         void      compute_background(const html_tag* el, const std::shared_ptr<document>& doc);
         void      compute_flex(const html_tag* el, const std::shared_ptr<document>& doc);
+        void      compute_grid(const html_tag* el, const std::shared_ptr<document>& doc);
         web_color get_color_property(const html_tag* el, string_id name, bool inherited, web_color default_value,
                                      uint_ptr member_offset) const;
         void      snap_border_width(css_length& width, const std::shared_ptr<document>& doc);
@@ -238,6 +248,12 @@ namespace litehtml
         flex_align_items     get_flex_align_items() const;
         flex_align_items     get_flex_align_self() const;
         flex_align_content   get_flex_align_content() const;
+
+        const css_length&    get_row_gap() const;
+        const css_length&    get_column_gap() const;
+
+        const length_vector& get_grid_template_columns() const;
+        const length_vector& get_grid_template_rows() const;
 
         int  get_order() const;
         void set_order(int order);
@@ -680,6 +696,26 @@ namespace litehtml
     inline flex_align_content css_properties::get_flex_align_content() const
     {
         return m_flex_align_content;
+    }
+
+    inline const css_length& css_properties::get_row_gap() const
+    {
+        return m_row_gap;
+    }
+
+    inline const css_length& css_properties::get_column_gap() const
+    {
+        return m_column_gap;
+    }
+
+    inline const length_vector& css_properties::get_grid_template_columns() const
+    {
+        return m_grid_template_columns;
+    }
+
+    inline const length_vector& css_properties::get_grid_template_rows() const
+    {
+        return m_grid_template_rows;
     }
 
     inline caption_side css_properties::get_caption_side() const

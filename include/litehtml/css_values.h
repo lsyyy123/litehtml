@@ -69,10 +69,10 @@ namespace litehtml
     // ==========================================================
     // CSS Property: display
     // ==========================================================
-    inline constexpr auto style_display_strings = split_css_values<18>(
+    inline constexpr auto style_display_strings = split_css_values<20>(
         "none;block;inline;inline-block;inline-table;list-item;table;table-caption;table-cell;table-column;"
         "table-column-group;table-footer-group;table-header-group;table-row;table-row-group;inline-text;flex;"
-        "inline-flex");
+        "inline-flex;grid;inline-grid");
 
     enum style_display
     {
@@ -94,6 +94,8 @@ namespace litehtml
         display_inline_text,
         display_flex,
         display_inline_flex,
+        display_grid,
+        display_inline_grid,
     };
 
     // ==========================================================
@@ -295,7 +297,7 @@ namespace litehtml
     // CSS units
     // ==========================================================
     inline constexpr auto css_units_strings =
-        split_css_values<17>("none;%;in;cm;mm;em;ex;pt;pc;px;vw;vh;vmin;vmax;rem;ch");
+        split_css_values<18>("none;%;in;cm;mm;em;ex;pt;pc;px;vw;vh;vmin;vmax;rem;ch;fr");
 
     enum css_units : uint8_t // see css_length
     {
@@ -315,6 +317,7 @@ namespace litehtml
         css_units_vmax,
         css_units_rem,
         css_units_ch,
+        css_units_fr,
     };
 
     // ==========================================================
@@ -647,6 +650,12 @@ namespace litehtml
         flex_basis_min_content,
         flex_basis_max_content,
     };
+
+    // ==========================================================
+    // CSS Property: gap / row-gap / column-gap (flex & grid)
+    // ==========================================================
+    // Only keyword is "normal" (computes to 0); otherwise a <length-percentage>.
+    inline constexpr auto gap_normal_strings = split_css_values<1>("normal");
 
     // ==========================================================
     // CSS Property: caption-side

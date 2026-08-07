@@ -147,6 +147,14 @@ void litehtml::css_properties::compute(const html_tag* el, const document::ptr& 
     doc->cvt_units(m_css_padding.top, m_font_metrics, 0_px);
     doc->cvt_units(m_css_padding.bottom, m_font_metrics, 0_px);
 
+    // gap / row-gap / column-gap (flex & grid). "normal" computes to 0.
+    m_row_gap    = el->get_property<css_length>(_row_gap_, false, 0.0, offset(m_row_gap));
+    m_column_gap = el->get_property<css_length>(_column_gap_, false, 0.0, offset(m_column_gap));
+    if(m_row_gap.is_predefined()) m_row_gap.set_value(0, css_units_px);
+    if(m_column_gap.is_predefined()) m_column_gap.set_value(0, css_units_px);
+    doc->cvt_units(m_row_gap, m_font_metrics, 0_px);
+    doc->cvt_units(m_column_gap, m_font_metrics, 0_px);
+
     m_css_borders.left.color =
         get_color_property(el, _border_left_color_, false, m_color, offset(m_css_borders.left.color));
     m_css_borders.right.color =
@@ -285,6 +293,7 @@ void litehtml::css_properties::compute(const html_tag* el, const document::ptr& 
 
     compute_background(el, doc);
     compute_flex(el, doc);
+    compute_grid(el, doc);
 }
 
 // used for all color properties except `color` (color:currentcolor is converted to color:inherit during parsing)
@@ -406,7 +415,7 @@ void litehtml::css_properties::compute_font(const html_tag* el, const document::
     m_font_style =
         static_cast<font_style>(el->get_property<int>(_font_style_, true, font_style_normal, offset(m_font_style)));
     bool propagate_decoration =
-        !is_one_of(m_display, display_inline_block, display_inline_table, display_inline_flex) &&
+        !is_one_of(m_display, display_inline_block, display_inline_table, display_inline_flex, display_inline_grid) &&
         m_float == float_none && !is_one_of(m_el_position, element_position_absolute, element_position_fixed);
 
     m_text_decoration_line = el->get_property<int>(_text_decoration_line_, propagate_decoration,
@@ -618,6 +627,36 @@ void litehtml::css_properties::compute_flex(const html_tag* el, const document::
         } else if(m_display == display_inline_flex)
         {
             m_display = display_flex;
+        }
+    }
+}
+
+void litehtml::css_properties::compute_grid(const html_tag* el, const document::ptr& doc)
+{
+    if(m_display == display_grid || m_display == display_inline_grid)
+    {
+        m_grid_template_columns = el->get_property<length_vector>(_grid_template_columns_, false, length_vector(),
+                                                                  offset(m_grid_template_columns));
+        m_grid_template_rows    = el->get_property<length_vector>(_grid_template_rows_, false, length_vector(),
+                                                                  offset(m_grid_template_rows));
+    }
+    auto parent = el->parent();
+    if(parent && (parent->css().m_display == display_grid || parent->css().m_display == display_inline_grid))
+    {
+        // Blockify grid items (CSS Grid 4.1): an inline-level display value
+        // blockifies to its block-level equivalent inside a grid container.
+        if(m_display == display_inline || m_display == display_inline_block)
+        {
+            m_display = display_block;
+        } else if(m_display == display_inline_table)
+        {
+            m_display = display_table;
+        } else if(m_display == display_inline_flex)
+        {
+            m_display = display_flex;
+        } else if(m_display == display_inline_grid)
+        {
+            m_display = display_grid;
         }
     }
 }

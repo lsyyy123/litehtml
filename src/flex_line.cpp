@@ -8,12 +8,17 @@ void litehtml::flex_line::distribute_free_space(pixel_t container_main_size)
     // If the sum is less than the flex container’s inner main size, use the flex grow factor for the
     // rest of this algorithm; otherwise, use the flex shrink factor.
 
-    if(main_size < container_main_size)
+    // The main-axis gap reserves (n-1)*main_gap of the container's inner main size; the remaining
+    // space is what flex grow/shrink distributes among the items.
+    pixel_t gap_total       = items.size() > 1 ? pixel_t(static_cast<int>(items.size()) - 1) * main_gap : 0_px;
+    pixel_t avail_main_size = container_main_size - gap_total;
+
+    if(main_size < avail_main_size)
     {
-        distribute_free_space_grow(container_main_size);
+        distribute_free_space_grow(avail_main_size);
     } else
     {
-        distribute_free_space_shrink(container_main_size);
+        distribute_free_space_shrink(avail_main_size);
     }
 }
 
@@ -488,9 +493,12 @@ litehtml::pixel_t litehtml::flex_line::calculate_items_position(pixel_t         
                                                                 formatting_context*             fmt_ctx)
 {
     /// Distribute main axis free space for auto-margins
-    pixel_t free_main_size = container_main_size - main_size;
+    // The main-axis gap reserves (n-1)*main_gap of the container's inner main size; auto-margins and
+    // justify-content distribute only what remains after the gaps.
+    pixel_t gap_total      = items.size() > 1 ? pixel_t(static_cast<int>(items.size()) - 1) * main_gap : 0_px;
+    pixel_t free_main_size = container_main_size - main_size - gap_total;
     distribute_main_auto_margins(free_main_size);
-    free_main_size = container_main_size - main_size;
+    free_main_size = container_main_size - main_size - gap_total;
 
     /// Fix justify-content property
     switch(justify_content)
@@ -576,9 +584,16 @@ litehtml::pixel_t litehtml::flex_line::calculate_items_position(pixel_t         
     pixel_t height = 0_px;
 
     pixel_t distribute_step = 1_px;
+    bool    first_item      = true;
     for(auto& item : items)
     {
-        main_pos += add_before_item;
+        // Insert the main-axis gap between adjacent items (not before the first one).
+        if(!first_item)
+        {
+            main_pos += main_gap;
+        }
+        first_item = false;
+        main_pos   += add_before_item;
         if(add_before_item > 0_px && item_remainder > 0_px)
         {
             main_pos       += distribute_step;

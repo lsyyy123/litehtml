@@ -3,6 +3,7 @@
 #include "document.h"
 #include "render_item.h"
 #include "render_flex.h"
+#include "render_grid.h"
 #include "render_inline.h"
 #include "render_table.h"
 #include "el_before_after.h"
@@ -57,13 +58,13 @@ namespace litehtml
     {
         return css().get_display() == display_inline || css().get_display() == display_inline_table ||
                css().get_display() == display_inline_block || css().get_display() == display_inline_text ||
-               css().get_display() == display_inline_flex;
+               css().get_display() == display_inline_flex || css().get_display() == display_inline_grid;
     }
 
     bool element::is_inline_box() const
     {
         return css().get_display() == display_inline_table || css().get_display() == display_inline_block ||
-               css().get_display() == display_inline_flex;
+               css().get_display() == display_inline_flex || css().get_display() == display_inline_grid;
     }
 
     bool element::is_ancestor(const ptr& el) const
@@ -148,6 +149,9 @@ namespace litehtml
         } else if(css().get_display() == display_flex || css().get_display() == display_inline_flex)
         {
             ret = std::make_shared<render_item_flex>(shared_from_this());
+        } else if(css().get_display() == display_grid || css().get_display() == display_inline_grid)
+        {
+            ret = std::make_shared<render_item_grid>(shared_from_this());
         }
         if(ret)
         {
@@ -263,6 +267,7 @@ namespace litehtml
         }
         if(m_css.get_display() == display_inline_block || m_css.get_display() == display_table_cell ||
            m_css.get_display() == display_inline_flex || m_css.get_display() == display_flex ||
+           m_css.get_display() == display_inline_grid || m_css.get_display() == display_grid ||
            m_css.get_display() == display_table_caption || is_root() || m_css.get_float() != float_none ||
            m_css.get_position() == element_position_absolute || m_css.get_position() == element_position_fixed ||
            m_css.get_overflow() > overflow_visible)

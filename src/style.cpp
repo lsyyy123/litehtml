@@ -99,6 +99,7 @@ namespace litehtml
 
         {_flex_,            {_flex_grow_, _flex_shrink_, _flex_basis_}                                                },
         {_flex_flow_,       {_flex_direction_, _flex_wrap_}                                                           },
+        {_gap_,             {_row_gap_, _column_gap_}                                                                 },
 
         {_text_decoration_,
          {_text_decoration_color_, _text_decoration_line_, _text_decoration_style_, _text_decoration_thickness_}      },
@@ -175,6 +176,48 @@ namespace litehtml
         {
             add_parsed_property(name, property_value(length, important));
         }
+    }
+
+    // Parse a <track-list> for grid-template-columns/rows into a length_vector.
+    // Each track becomes a css_length: px/em/etc (its unit), % (percentage),
+    // fr (css_units_fr), or a predefined value for auto/min-content/max-content.
+    // repeat()/minmax() and named lines are not yet supported (return false so
+    // the template falls back to `none`, i.e. a single auto track).
+    static bool parse_grid_track_list(const css_token_vector& value, length_vector& out)
+    {
+        out.clear();
+        if(value.size() == 1 && value[0].type == IDENT && value[0].ident() == "none")
+        {
+            return true; // empty -> none
+        }
+        for(const auto& tok : value)
+        {
+            css_length len;
+            if(tok.type == DIMENSION)
+            {
+                if(!len.from_token(tok, f_length)) return false;
+                out.push_back(len);
+            } else if(tok.type == PERCENTAGE)
+            {
+                if(!len.from_token(tok, f_percentage)) return false;
+                out.push_back(len);
+            } else if(tok.type == IDENT)
+            {
+                const std::string id = tok.ident();
+                if(id == "auto" || id == "min-content" || id == "max-content")
+                {
+                    out.push_back(css_length::predef_value(0));
+                } else
+                {
+                    return false;
+                }
+            } else
+            {
+                // CV_FUNCTION (minmax/repeat), line names [x], etc. — unsupported
+                return false;
+            }
+        }
+        return !out.empty();
     }
 
     // `value` is a list of component values with all whitespace tokens removed, including those inside component values
@@ -551,6 +594,49 @@ namespace litehtml
         case _flex_flow_:
             parse_flex_flow(value, important);
             break;
+
+        //  =============================  GAP (flex & grid)  =============================
+        // row-gap / column-gap = normal | <length-percentage [0,∞]>
+        case _row_gap_:
+        case _column_gap_:
+            add_length_property(name, val, gap_normal_strings, f_number | f_length_percentage | f_positive, important);
+            break;
+
+        // gap = <'row-gap'> <'column-gap'>?  (single value applies to both)
+        case _gap_:
+            if(value.size() == 1)
+            {
+                css_length length;
+                if(length.from_token(value[0], f_number | f_length_percentage | f_positive, gap_normal_strings))
+                {
+                    add_parsed_property(_row_gap_, property_value(length, important));
+                    add_parsed_property(_column_gap_, property_value(length, important));
+                }
+            } else if(value.size() == 2)
+            {
+                css_length row_gap;
+                css_length column_gap;
+                if(row_gap.from_token(value[0], f_number | f_length_percentage | f_positive, gap_normal_strings) &&
+                   column_gap.from_token(value[1], f_number | f_length_percentage | f_positive, gap_normal_strings))
+                {
+                    add_parsed_property(_row_gap_, property_value(row_gap, important));
+                    add_parsed_property(_column_gap_, property_value(column_gap, important));
+                }
+            }
+            break;
+
+        //  =============================  GRID  =============================
+        // grid-template-columns / grid-template-rows = none | <track-list>
+        case _grid_template_columns_:
+        case _grid_template_rows_:
+        {
+            length_vector tracks;
+            if(parse_grid_track_list(value, tracks))
+            {
+                add_parsed_property(name, property_value(tracks, important));
+            }
+            break;
+        }
 
         case _align_items_:
         case _align_self_:

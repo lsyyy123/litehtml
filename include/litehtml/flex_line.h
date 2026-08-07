@@ -15,6 +15,7 @@ namespace litehtml
         pixel_t  main_size  = 0; // sum of all items main size, initially the sum of hypothetical main sizes
         pixel_t  cross_size = 0; // sum of all items cross size
         pixel_t  base_size  = 0;
+        pixel_t  main_gap   = 0; // main-axis gap between adjacent items (column-gap for row, row-gap for column)
         int      num_auto_margin_main_start = 0; // number of items with auto margin left/top
         int      num_auto_margin_main_end   = 0; // number of items with auto margin right/bottom
         baseline first_baseline;

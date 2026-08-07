@@ -4,6 +4,9 @@
 #include <cstdlib>
 namespace litehtml
 {
+    // MSVC rejects std::abs(float) inside constexpr; use a local helper.
+    constexpr float pixel_absf(float v) { return v < 0.0f ? -v : v; }
+
     // A class that represents a pixel value as a float. It provides arithmetic and comparison operators for easy
     // manipulation of pixel values.
     class pixel_float_t
@@ -118,7 +121,7 @@ namespace litehtml
         // Comparison operators
         constexpr bool operator==(pixel_float_t other) const
         {
-            return std::abs(m_value - other.m_value) < epsilon;
+            return pixel_absf(m_value - other.m_value) < epsilon;
         }
         constexpr bool operator!=(pixel_float_t other) const
         {
@@ -126,11 +129,11 @@ namespace litehtml
         }
         constexpr bool operator<(pixel_float_t other) const
         {
-            return m_value < other.m_value && std::abs(m_value - other.m_value) >= epsilon;
+            return m_value < other.m_value && pixel_absf(m_value - other.m_value) >= epsilon;
         }
         constexpr bool operator>(pixel_float_t other) const
         {
-            return m_value > other.m_value && std::abs(m_value - other.m_value) >= epsilon;
+            return m_value > other.m_value && pixel_absf(m_value - other.m_value) >= epsilon;
         }
         constexpr bool operator<=(pixel_float_t other) const
         {

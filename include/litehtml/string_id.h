@@ -90,6 +90,14 @@ namespace litehtml
         _flex_, _flex_flow_, _flex_direction_, _flex_wrap_, _justify_content_, _align_items_, _align_content_,
         _align_self_, _flex_grow_, _flex_shrink_, _flex_basis_,
 
+        _gap_, _row_gap_, _column_gap_,
+
+        // CSS Grid
+        _grid_, _grid_template_, _grid_template_columns_, _grid_template_rows_, _grid_template_areas_,
+        _grid_column_, _grid_column_start_, _grid_column_end_, _grid_row_, _grid_row_start_, _grid_row_end_,
+        _grid_area_, _grid_auto_flow_, _grid_auto_columns_, _grid_auto_rows_,
+        _fr_, _minmax_, _repeat_, _dense_, _auto_flow_,
+
         _caption_side_, _order_,
 
         _counter_reset_, _counter_increment_,

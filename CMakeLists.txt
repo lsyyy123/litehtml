@@ -74,6 +74,7 @@ set(SOURCE_LITEHTML
 	src/render_inline_context.cpp
 	src/render_table.cpp
 	src/render_flex.cpp
+	src/render_grid.cpp
 	src/render_image.cpp
 	src/formatting_context.cpp
 	src/flex_item.cpp
@@ -138,6 +139,7 @@ set(HEADER_LITEHTML
 	include/litehtml/line_box.h
 	include/litehtml/render_item.h
 	include/litehtml/render_flex.h
+	include/litehtml/render_grid.h
 	include/litehtml/render_image.h
 	include/litehtml/render_inline.h
 	include/litehtml/render_table.h

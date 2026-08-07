@@ -58,6 +58,7 @@ bool litehtml::inline_selector::select(const std::shared_ptr<render_item>& el)
     return el->src_el()->css().get_display() == display_inline_text ||
            el->src_el()->css().get_display() == display_inline_table ||
            el->src_el()->css().get_display() == display_inline_block ||
+           el->src_el()->css().get_display() == display_inline_grid ||
            el->src_el()->css().get_display() == display_inline_flex || el->src_el()->css().get_float() != float_none;
 }
 
