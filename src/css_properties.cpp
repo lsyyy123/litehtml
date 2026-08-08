@@ -717,6 +717,10 @@ void litehtml::css_properties::compute_grid(const html_tag* el, const document::
                                                                       grid_track_vector(), offset(m_grid_template_columns));
         m_grid_template_rows    = el->get_property<grid_track_vector>(_grid_template_rows_, false,
                                                                       grid_track_vector(), offset(m_grid_template_rows));
+        m_grid_auto_columns     = el->get_property<grid_track_vector>(_grid_auto_columns_, false,
+                                                                      grid_track_vector(), offset(m_grid_auto_columns));
+        m_grid_auto_rows        = el->get_property<grid_track_vector>(_grid_auto_rows_, false,
+                                                                      grid_track_vector(), offset(m_grid_auto_rows));
         // grid-auto-flow is stored as an int: bit0 = axis (0 row / 1 column),
         // bit1 = dense packing.
         int flow                 = el->get_property<int>(_grid_auto_flow_, false, 0, offset(m_grid_auto_flow));

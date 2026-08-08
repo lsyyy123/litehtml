@@ -142,11 +142,18 @@ std::vector<litehtml::pixel_t> litehtml::render_item_grid::resolve_columns(const
     }
 
     // The length a track sizes toward: the max bound for minmax(), else its value.
-    // A track index beyond the explicit list is an implicit (auto) track grown by
-    // definite placement.
+    // A track index beyond the explicit list is an implicit track sized by
+    // grid-auto-columns (cycled); empty grid-auto-columns means auto.
+    const grid_track_vector& auto_tracks = css().get_grid_auto_columns();
+    const int              explicit_cnt  = static_cast<int>(tracks.size());
     auto track_size = [&](int c) -> const css_length& {
         static const css_length implicit_auto = css_length::predef_value(0);
-        if(c >= (int)tracks.size()) return implicit_auto;
+        if(c >= explicit_cnt)
+        {
+            if(auto_tracks.empty()) return implicit_auto;
+            const grid_track_size& at = auto_tracks[(c - explicit_cnt) % auto_tracks.size()];
+            return at.is_minmax ? at.max : at.min;
+        }
         return tracks[c].is_minmax ? tracks[c].max : tracks[c].min;
     };
 
@@ -524,17 +531,25 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     // (height); an indefinite height makes the percentage gap behave as 0.
     const pixel_t row_gap = css().get_row_gap().calc_percent(height_base);
 
+    // Implicit rows are sized by grid-auto-rows (cycled); empty means auto.
+    const grid_track_vector& auto_rows   = css().get_grid_auto_rows();
+    const int              explicit_rows = static_cast<int>(rows_t.size());
     for(int r = 0; r < nrows; r++)
     {
-        if(r >= static_cast<int>(rows_t.size())) break;
-        // A minmax() row sizes toward its max bound; the min bound floors it below.
-        const css_length& tr = rows_t[r].is_minmax ? rows_t[r].max : rows_t[r].min;
+        // Resolve the track size for this row: explicit, else grid-auto-rows.
+        const css_length* tr_p  = nullptr;
+        const grid_track_size* cur = nullptr;
+        if(r < explicit_rows) cur = &rows_t[r];
+        else if(!auto_rows.empty()) cur = &auto_rows[(r - explicit_rows) % auto_rows.size()];
+        if(cur) tr_p = cur->is_minmax ? &cur->max : &cur->min;
+        if(!tr_p) continue; // no sizing info -> content sized
+        const css_length& tr = *tr_p;
         if(tr.is_predefined() || tr.units() == css_units_fr) continue; // auto/fr -> content sized
         if(tr.units() == css_units_percentage && !height_definite) continue; // indefinite -> auto
         row_h[r] = doc->to_pixels(tr, fmet, height_base);
-        if(rows_t[r].is_minmax)
+        if(cur->is_minmax)
         {
-            const css_length& mn = rows_t[r].min;
+            const css_length& mn = cur->min;
             if(!mn.is_predefined() && mn.units() != css_units_fr &&
                (mn.units() != css_units_percentage || height_definite))
             {
@@ -618,9 +633,22 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     pixel_t ac_off = 0_px, ac_extra = 0_px;
     if(height_definite)
     {
-        int ac = base_align(static_cast<int>(css().get_flex_align_content()));
-        distribute_tracks(static_cast<flex_justify_content>(ac), container_h, row_gap, row_h, row_is_auto, ac_off,
-                          ac_extra);
+        // flex_align_content and flex_justify_content are distinct enums whose
+        // numeric values do NOT line up (e.g. space-between is 5 in the former
+        // but 4 in the latter). Map explicitly instead of casting.
+        flex_justify_content ac;
+        switch(base_align(static_cast<int>(css().get_flex_align_content())))
+        {
+        case flex_align_content_center:        ac = flex_justify_content_center; break;
+        case flex_align_content_space_between: ac = flex_justify_content_space_between; break;
+        case flex_align_content_space_around:  ac = flex_justify_content_space_around; break;
+        case flex_align_content_space_evenly:  ac = flex_justify_content_space_evenly; break;
+        case flex_align_content_stretch:       ac = flex_justify_content_stretch; break;
+        case flex_align_content_end:
+        case flex_align_content_flex_end:      ac = flex_justify_content_flex_end; break;
+        default:                               ac = flex_justify_content_normal; break;
+        }
+        distribute_tracks(ac, container_h, row_gap, row_h, row_is_auto, ac_off, ac_extra);
     }
 
     // Pass 2: place items into their grid areas. Track offset arrays carry the

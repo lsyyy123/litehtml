@@ -103,6 +103,11 @@ namespace litehtml
         grid_track_vector m_grid_template_columns;
         grid_track_vector m_grid_template_rows;
 
+        // CSS Grid: implicit track sizing (grid-auto-columns / grid-auto-rows).
+        // Each is a track list applied cyclically to implicit tracks; empty = auto.
+        grid_track_vector m_grid_auto_columns;
+        grid_track_vector m_grid_auto_rows;
+
         // CSS Grid: parsed grid-template-areas (empty cells = property not set).
         grid_area_map m_grid_areas;
 
@@ -280,6 +285,8 @@ namespace litehtml
 
         const grid_track_vector& get_grid_template_columns() const;
         const grid_track_vector& get_grid_template_rows() const;
+        const grid_track_vector& get_grid_auto_columns() const;
+        const grid_track_vector& get_grid_auto_rows() const;
         const grid_area_map&     get_grid_areas() const;
         const grid_line&         get_grid_column_start() const;
         const grid_line&         get_grid_column_end() const;
@@ -751,6 +758,16 @@ namespace litehtml
     inline const grid_track_vector& css_properties::get_grid_template_rows() const
     {
         return m_grid_template_rows;
+    }
+
+    inline const grid_track_vector& css_properties::get_grid_auto_columns() const
+    {
+        return m_grid_auto_columns;
+    }
+
+    inline const grid_track_vector& css_properties::get_grid_auto_rows() const
+    {
+        return m_grid_auto_rows;
     }
 
     inline const grid_area_map& css_properties::get_grid_areas() const

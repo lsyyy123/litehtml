@@ -879,6 +879,233 @@ namespace litehtml
             break;
         }
 
+        // grid = <grid-template> |
+        //        <grid-template-rows> / [ auto-flow && dense? ] <grid-auto-columns>? |
+        //        [ auto-flow && dense? ] <grid-auto-rows>? / <grid-template-columns>
+        // The full <grid-template> form (areas + row sizes in strings + an
+        // optional / <columns>) is handled by _grid_template_ below. Here we
+        // cover the two explicit-track forms and the auto-flow forms.
+        case _grid_:
+        {
+            // Split on the top-level '/' separating the row axis from the
+            // column axis. Track lists never contain a bare '/' token.
+            size_t slash = value.size();
+            for(size_t i = 0; i < value.size(); i++)
+            {
+                if(value[i].type == '/') { slash = i; break; }
+            }
+            if(slash == value.size())
+            {
+                // No '/': a lone <grid-template-rows> track list (columns auto).
+                grid_track_vector rows;
+                if(!parse_grid_track_list(value, rows, false)) break;
+                add_parsed_property(_grid_template_rows_, property_value(rows, important));
+                break;
+            }
+            css_token_vector before(value.begin(), value.begin() + slash);
+            css_token_vector after(value.begin() + slash + 1, value.end());
+
+            // Detect an auto-flow keyword sequence at the start of a group.
+            auto parse_auto_flow = [](css_token_vector& toks, int& flow_out,
+                                      grid_track_vector& auto_tracks, bool& is_auto) -> bool {
+                flow_out = 0; is_auto = false; auto_tracks.clear();
+                size_t i = 0;
+                bool saw_af = false;
+                // [ auto-flow && dense? ]
+                while(i < toks.size() && toks[i].type == IDENT)
+                {
+                    const std::string id = lowcase(toks[i].ident());
+                    if(id == "auto-flow") { saw_af = true; i++; }
+                    else if(id == "dense") { flow_out |= 2; i++; }
+                    else break;
+                }
+                if(saw_af)
+                {
+                    is_auto = true;
+                    // Optional explicit axis track list follows the keywords.
+                    if(i < toks.size())
+                    {
+                        css_token_vector rest(toks.begin() + i, toks.end());
+                        if(!parse_grid_track_list(rest, auto_tracks, false)) return false;
+                    }
+                    return true;
+                }
+                return true; // not auto-flow: caller treats whole group as track list
+            };
+
+            int  before_flow = 0, after_flow = 0;
+            bool before_auto = false, after_auto = false;
+            grid_track_vector before_auto_tracks, after_auto_tracks;
+            if(!parse_auto_flow(before, before_flow, before_auto_tracks, before_auto)) break;
+            if(!parse_auto_flow(after, after_flow, after_auto_tracks, after_auto)) break;
+
+            if(before_auto)
+            {
+                // [auto-flow dense?] <grid-auto-rows>? / <grid-template-columns>
+                // auto-flow before the '/' means the column axis is the auto-placement
+                // (flow) axis -> grid-auto-flow: column (bit0 = 1).
+                grid_track_vector cols;
+                if(!parse_grid_track_list(after, cols, false)) break;
+                add_parsed_property(_grid_template_columns_, property_value(cols, important));
+                if(!before_auto_tracks.empty())
+                    add_parsed_property(_grid_auto_rows_, property_value(before_auto_tracks, important));
+                add_parsed_property(_grid_auto_flow_, property_value(before_flow | 1, important));
+            } else if(after_auto)
+            {
+                // <grid-template-rows> / [auto-flow dense?] <grid-auto-columns>?
+                grid_track_vector rows;
+                if(!parse_grid_track_list(before, rows, false)) break;
+                add_parsed_property(_grid_template_rows_, property_value(rows, important));
+                if(!after_auto_tracks.empty())
+                    add_parsed_property(_grid_auto_columns_, property_value(after_auto_tracks, important));
+                add_parsed_property(_grid_auto_flow_, property_value(after_flow, important));
+            } else
+            {
+                // <grid-template-rows> / <grid-template-columns>
+                grid_track_vector rows, cols;
+                if(!parse_grid_track_list(before, rows, false)) break;
+                if(!parse_grid_track_list(after, cols, false)) break;
+                add_parsed_property(_grid_template_rows_, property_value(rows, important));
+                add_parsed_property(_grid_template_columns_, property_value(cols, important));
+            }
+            break;
+        }
+
+        // grid-template = none |
+        //   [ <line-names>? <string> <track-size>? <line-names>? ]+
+        //   [ / <explicit-track-list> ]?
+        // Also accepts the sub-form <grid-template-rows> / <grid-template-columns>
+        // (no area strings), which overlaps the `grid` shorthand.
+        case _grid_template_:
+        {
+            // No area strings -> delegate to the <rows> / <cols> track-list form.
+            bool has_string = false;
+            for(const auto& tok : value)
+                if(tok.type == STRING) { has_string = true; break; }
+            if(!has_string)
+            {
+                size_t slash = value.size();
+                for(size_t i = 0; i < value.size(); i++)
+                    if(value[i].type == '/') { slash = i; break; }
+                if(slash == value.size())
+                {
+                    grid_track_vector rows;
+                    if(!parse_grid_track_list(value, rows, false)) break;
+                    add_parsed_property(_grid_template_rows_, property_value(rows, important));
+                    break;
+                }
+                css_token_vector before(value.begin(), value.begin() + slash);
+                css_token_vector after(value.begin() + slash + 1, value.end());
+                grid_track_vector rows, cols;
+                if(!parse_grid_track_list(before, rows, false)) break;
+                if(!parse_grid_track_list(after, cols, false)) break;
+                add_parsed_property(_grid_template_rows_, property_value(rows, important));
+                add_parsed_property(_grid_template_columns_, property_value(cols, important));
+                break;
+            }
+            // Area form: [ <line-names>? <string> <track-size>? <line-names>? ]+
+            //            [ / <explicit-track-list> ]?
+            // Split off the optional trailing "/ <columns>" first.
+            size_t slash = value.size();
+            for(size_t i = 0; i < value.size(); i++)
+                if(value[i].type == '/') { slash = i; break; }
+            css_token_vector rows_part(value.begin(), value.begin() + slash);
+            css_token_vector cols_part;
+            if(slash < value.size()) cols_part.assign(value.begin() + slash + 1, value.end());
+
+            // Walk the rows part: optional [names], a row string, optional
+            // track size, optional [names]; repeat.
+            grid_area_map map;
+            grid_track_vector row_tracks;
+            std::vector<std::vector<std::string>> area_rows;
+            std::vector<std::string> pending_names;
+            bool ok = true;
+            size_t i = 0;
+            auto flush_row = [&](const std::string& cells_str, const grid_track_size& trk) {
+                // Split the row string into cells.
+                std::vector<std::string> cells;
+                std::string cur;
+                for(char ch : cells_str)
+                {
+                    if(ch==' '||ch=='\t'||ch=='\n'||ch=='\r'||ch=='\f')
+                    { if(!cur.empty()){cells.push_back(cur);cur.clear();} }
+                    else cur += ch;
+                }
+                if(!cur.empty()) cells.push_back(cur);
+                if(cells.empty()) { ok = false; return; }
+                area_rows.push_back(cells);
+                grid_track_size t = trk;
+                t.line_names = pending_names;
+                pending_names.clear();
+                row_tracks.push_back(t);
+            };
+            while(i < rows_part.size() && ok)
+            {
+                const auto& tok = rows_part[i];
+                if(tok.type == SQUARE_BLOCK)
+                {
+                    for(const auto& sub : tok.value)
+                        if(sub.type == IDENT) pending_names.push_back(lowcase(sub.ident()));
+                    i++;
+                    continue;
+                }
+                if(tok.type == STRING)
+                {
+                    grid_track_size trk; // default auto
+                    // Optional track size follows the string.
+                    if(i + 1 < rows_part.size() && rows_part[i+1].type != STRING &&
+                       rows_part[i+1].type != SQUARE_BLOCK)
+                    {
+                        css_token_vector one{rows_part[i+1]};
+                        grid_track_vector tv;
+                        if(parse_grid_track_list(one, tv, false) && tv.size() == 1)
+                        { trk = tv[0]; i++; }
+                    }
+                    flush_row(tok.str(), trk);
+                    i++;
+                    continue;
+                }
+                ok = false; // unexpected token
+            }
+            if(!ok || area_rows.empty()) break;
+            // Validate rectangular areas (same rule as grid-template-areas).
+            const int ncols = static_cast<int>(area_rows[0].size());
+            for(const auto& row : area_rows)
+                if(static_cast<int>(row.size()) != ncols) { ok = false; break; }
+            if(ok)
+            {
+                for(int r = 0; r < (int)area_rows.size() && ok; r++)
+                    for(int c = 0; c < ncols && ok; c++)
+                    {
+                        const std::string& nm = area_rows[r][c];
+                        if(nm == ".") continue;
+                        int rmin=r,rmax=r,cmin=c,cmax=c;
+                        for(int r2=0;r2<(int)area_rows.size();r2++)
+                            for(int c2=0;c2<ncols;c2++)
+                                if(area_rows[r2][c2]==nm)
+                                { rmin=std::min(rmin,r2);rmax=std::max(rmax,r2);
+                                  cmin=std::min(cmin,c2);cmax=std::max(cmax,c2); }
+                        for(int r2=rmin;r2<=rmax&&ok;r2++)
+                            for(int c2=cmin;c2<=cmax;c2++)
+                                if(area_rows[r2][c2]!=nm){ok=false;break;}
+                    }
+            }
+            if(!ok) break;
+            map.rows = static_cast<int>(area_rows.size());
+            map.cols = ncols;
+            for(const auto& row : area_rows)
+                for(const auto& cell : row) map.cells.push_back(cell=="."?"":cell);
+            add_parsed_property(_grid_template_areas_, property_value(map, important));
+            add_parsed_property(_grid_template_rows_, property_value(row_tracks, important));
+            if(!cols_part.empty())
+            {
+                grid_track_vector cols;
+                if(!parse_grid_track_list(cols_part, cols, false)) break;
+                add_parsed_property(_grid_template_columns_, property_value(cols, important));
+            }
+            break;
+        }
+
         // grid-template-areas = none | <string>+  (each string is one row of cells)
         case _grid_template_areas_:
         {
@@ -979,6 +1206,21 @@ namespace litehtml
             add_parsed_property(_grid_column_start_, property_value(gls[1], important));
             if(lone_area || groups.size() > 2) add_parsed_property(_grid_row_end_, property_value(gls[2], important));
             if(lone_area || groups.size() > 3) add_parsed_property(_grid_column_end_, property_value(gls[3], important));
+            break;
+        }
+
+        // grid-auto-columns / grid-auto-rows = <track-size>+  (cyclic list for
+        // implicit tracks). Uses the same track-list parser as grid-template-*,
+        // but a bare "auto" / "none" yields a single auto track rather than none.
+        case _grid_auto_columns_:
+        case _grid_auto_rows_:
+        {
+            grid_track_vector tracks;
+            if(parse_grid_track_list(value, tracks, false))
+            {
+                if(tracks.empty()) tracks.push_back(grid_track_size()); // "none" -> auto
+                add_parsed_property(name, property_value(tracks, important));
+            }
             break;
         }
 
