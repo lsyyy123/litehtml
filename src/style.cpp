@@ -2100,8 +2100,14 @@ namespace litehtml
         {
             if(name.size() == 1 && name[0].type == STRING)
             {
-                // result.push_back(name[0].str);
-                result += name[0].str() + ',';
+                // Keep quotes so the layout backend can distinguish a family
+                // name string from an unquoted CSS generic keyword.
+                result += '"';
+                for (char c : name[0].str()) {
+                    if (c == '"' || c == '\\') result += '\\';
+                    result += c;
+                }
+                result += "\",";
                 continue;
             }
 
