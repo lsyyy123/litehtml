@@ -1,7 +1,11 @@
 #ifndef LITEHTML_STYLESHEET_H
 #define LITEHTML_STYLESHEET_H
 
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "css_selector.h"
 #include "css_tokenizer.h"
@@ -62,11 +66,33 @@ namespace litehtml
     {
         css_selector::vector m_selectors;
 
+        // Key-selector index: every selector is filed under one bucket decided by its rightmost
+        // compound (id, else class, else attribute name, else tag, else universal). An element only
+        // has to look at the buckets its own id/classes/attributes/tag can reach instead of walking
+        // the whole sheet, which is what keeps apply_stylesheet from being O(elements x selectors).
+        // Buckets hold indices into m_selectors so candidates can be merged back into sheet order.
+        struct selector_index
+        {
+            std::unordered_map<int, std::vector<uint32_t>> by_id;
+            std::unordered_map<int, std::vector<uint32_t>> by_class;
+            std::unordered_map<int, std::vector<uint32_t>> by_attr;
+            std::unordered_map<int, std::vector<uint32_t>> by_tag;
+            std::vector<uint32_t>                          universal;
+        };
+        // Built on demand; not thread safe, matching the rest of litehtml.
+        mutable std::unique_ptr<selector_index> m_index;
+
       public:
         const css_selector::vector& selectors() const
         {
             return m_selectors;
         }
+
+        // Fills out (in m_selectors order) with the indices of every selector whose rightmost
+        // compound can match an element with the given tag/id/classes/attributes. A candidate still
+        // has to go through select(); this only rules out the impossible ones.
+        void collect_candidates(string_id tag, string_id id, const std::vector<string_id>& classes,
+                                const string_map& attrs, std::vector<uint32_t>& out) const;
 
         template <class Input>
         void parse_css_stylesheet(const Input& input, const std::string& baseurl, const std::shared_ptr<document>& doc,
@@ -75,6 +101,8 @@ namespace litehtml
         void sort_selectors();
 
       private:
+        void build_index() const;
+
         bool parse_style_rule(const raw_rule::ptr& rule, const std::string& baseurl,
                               const std::shared_ptr<document>& doc, const media_query_list_list::ptr& media);
         void parse_import_rule(const raw_rule::ptr& rule, const std::string& baseurl,
@@ -86,6 +114,7 @@ namespace litehtml
     {
         selector->m_order = static_cast<int>(m_selectors.size());
         m_selectors.push_back(selector);
+        m_index.reset();
     }
 
 } // namespace litehtml

@@ -187,8 +187,15 @@ namespace litehtml
 
     void litehtml::html_tag::apply_stylesheet(const litehtml::css& stylesheet)
     {
-        for(const auto& sel : stylesheet.selectors())
+        // Only the selectors whose rightmost compound can reach this element, in sheet order.
+        std::vector<uint32_t> candidates;
+        stylesheet.collect_candidates(m_tag, m_id, m_classes, m_attrs, candidates);
+
+        const css_selector::vector& all_selectors = stylesheet.selectors();
+        for(uint32_t cand_idx : candidates)
         {
+            const auto& sel = all_selectors[cand_idx];
+
             // optimization
             {
                 const auto& r = sel->m_right;
