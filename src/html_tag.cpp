@@ -189,7 +189,7 @@ namespace litehtml
     {
         // Only the selectors whose rightmost compound can reach this element, in sheet order.
         std::vector<uint32_t> candidates;
-        stylesheet.collect_candidates(m_tag, m_id, m_classes, m_attrs, candidates);
+        stylesheet.collect_candidates(m_tag, m_id, m_classes, m_attrs, _root_ in m_pseudo_classes, candidates);
 
         const css_selector::vector& all_selectors = stylesheet.selectors();
         for(uint32_t cand_idx : candidates)

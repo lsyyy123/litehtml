@@ -7,7 +7,6 @@
 
 namespace litehtml
 {
-
     // https://www.w3.org/TR/css-syntax-3/#parse-a-css-stylesheet
     template <class Input> // Input == string or css_token_vector
     void css::parse_css_stylesheet(const Input& input, const std::string& baseurl, const std::shared_ptr<document>& doc,
@@ -156,53 +155,125 @@ namespace litehtml
         m_index.reset();
     }
 
+    // An id, class or attribute name in a compound is a hard requirement that select() checks with
+    // the very same comparison (select_attribute bails out when the attribute is absent), so filing
+    // a selector under it cannot hide a match. Most selective key first.
+    css::compound_key css::key_of(const css_element_selector& compound)
+    {
+        string_id key_id    = empty_id;
+        string_id key_class = empty_id;
+        string_id key_attr  = empty_id;
+        for(const auto& attr : compound.m_attrs)
+        {
+            if(attr.name == empty_id)
+            {
+                continue;
+            }
+            if(attr.type == select_id && key_id == empty_id)
+            {
+                key_id = attr.name;
+            } else if(attr.type == select_class && key_class == empty_id)
+            {
+                key_class = attr.name;
+            } else if(attr.type == select_attr && key_attr == empty_id)
+            {
+                key_attr = attr.name;
+            }
+        }
+
+        if(key_id != empty_id) return {key_kind::id, key_id};
+        if(key_class != empty_id) return {key_kind::cls, key_class};
+        if(key_attr != empty_id) return {key_kind::attr, key_attr};
+        if(compound.m_tag != star_id) return {key_kind::tag, compound.m_tag};
+        return {};
+    }
+
     void css::build_index() const
     {
         auto index = std::unique_ptr<selector_index>(new selector_index());
 
+        std::vector<compound_key> is_keys;
         for(size_t i = 0; i < m_selectors.size(); i++)
         {
             const css_element_selector& right = m_selectors[i]->m_right;
 
-            // An id, class or attribute name in the rightmost compound is a hard requirement that
-            // select() checks with the very same comparison (select_attribute bails out when the
-            // attribute is absent), so filing the selector under it cannot hide a match. Most
-            // selective key first.
-            string_id key_id    = empty_id;
-            string_id key_class = empty_id;
-            string_id key_attr  = empty_id;
+            // :root pins the selector to a single element; :is() lets an otherwise keyless compound
+            // borrow the keys of its arguments, which is what rescues modern sheets from the
+            // universal bucket.
+            bool                              needs_root = false;
+            const css_attribute_selector*     is_arg     = nullptr;
             for(const auto& attr : right.m_attrs)
             {
-                if(attr.name == empty_id)
+                if(attr.type != select_pseudo_class)
                 {
                     continue;
                 }
-                if(attr.type == select_id && key_id == empty_id)
+                if(attr.name == _root_)
                 {
-                    key_id = attr.name;
-                } else if(attr.type == select_class && key_class == empty_id)
+                    needs_root = true;
+                } else if(attr.name == _is_ && is_arg == nullptr)
                 {
-                    key_class = attr.name;
-                } else if(attr.type == select_attr && key_attr == empty_id)
-                {
-                    key_attr = attr.name;
+                    is_arg = &attr;
                 }
             }
 
-            uint32_t idx = static_cast<uint32_t>(i);
-            if(key_id != empty_id)
+            uint32_t   idx = static_cast<uint32_t>(i);
+            const auto key = key_of(right);
+
+            auto file = [&](const compound_key& k) {
+                switch(k.kind)
+                {
+                case key_kind::id: index->by_id[k.name].push_back(idx); break;
+                case key_kind::cls: index->by_class[k.name].push_back(idx); break;
+                case key_kind::attr: index->by_attr[k.name].push_back(idx); break;
+                case key_kind::tag: index->by_tag[k.name].push_back(idx); break;
+                case key_kind::none: index->universal.push_back(idx); break;
+                }
+            };
+
+            if(needs_root)
             {
-                index->by_id[key_id].push_back(idx);
-            } else if(key_class != empty_id)
+                index->root_only.push_back(idx);
+                continue;
+            }
+            if(key.kind != key_kind::none)
             {
-                index->by_class[key_class].push_back(idx);
-            } else if(key_attr != empty_id)
+                file(key);
+                continue;
+            }
+
+            // :is(a, b) matches if any argument matches, so the selector can be filed under every
+            // argument's key. One keyless argument means any element could match, so the whole
+            // thing has to stay universal.
+            if(is_arg != nullptr && !is_arg->selector_list.empty())
             {
-                index->by_attr[key_attr].push_back(idx);
-            } else if(right.m_tag != star_id)
-            {
-                index->by_tag[right.m_tag].push_back(idx);
-            } else
+                is_keys.clear();
+                bool all_keyed = true;
+                for(const auto& sub : is_arg->selector_list)
+                {
+                    const auto sub_key = key_of(sub->m_right);
+                    if(sub_key.kind == key_kind::none)
+                    {
+                        all_keyed = false;
+                        break;
+                    }
+                    // :is(.a, .a) would otherwise file the same index twice in one bucket, and a
+                    // single-bucket lookup does not dedupe.
+                    if(std::find(is_keys.begin(), is_keys.end(), sub_key) == is_keys.end())
+                    {
+                        is_keys.push_back(sub_key);
+                    }
+                }
+                if(all_keyed)
+                {
+                    for(const auto& k : is_keys)
+                    {
+                        file(k);
+                    }
+                    continue;
+                }
+            }
+
             {
                 index->universal.push_back(idx);
             }
@@ -212,7 +283,7 @@ namespace litehtml
     }
 
     void css::collect_candidates(string_id tag, string_id id, const std::vector<string_id>& classes,
-                                 const string_map& attrs, std::vector<uint32_t>& out) const
+                                 const string_map& attrs, bool is_root, std::vector<uint32_t>& out) const
     {
         out.clear();
 
@@ -265,6 +336,11 @@ namespace litehtml
             }
         }
         take(m_index->by_tag, tag);
+        if(is_root && !m_index->root_only.empty())
+        {
+            out.insert(out.end(), m_index->root_only.begin(), m_index->root_only.end());
+            buckets++;
+        }
         if(!m_index->universal.empty())
         {
             out.insert(out.end(), m_index->universal.begin(), m_index->universal.end());

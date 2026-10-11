@@ -77,8 +77,28 @@ namespace litehtml
             std::unordered_map<int, std::vector<uint32_t>> by_class;
             std::unordered_map<int, std::vector<uint32_t>> by_attr;
             std::unordered_map<int, std::vector<uint32_t>> by_tag;
-            std::vector<uint32_t>                          universal;
+            // :root in the rightmost compound pins the selector to the one root element, so these
+            // are worth keeping out of the universal bucket even though they have no other key.
+            std::vector<uint32_t> root_only;
+            std::vector<uint32_t> universal;
         };
+
+        // What a compound selector demands of an element, used to pick its bucket.
+        enum class key_kind
+        {
+            none,
+            id,
+            cls,
+            attr,
+            tag
+        };
+        struct compound_key
+        {
+            key_kind  kind = key_kind::none;
+            string_id name = empty_id;
+            bool      operator==(const compound_key& o) const { return kind == o.kind && name == o.name; }
+        };
+        static compound_key key_of(const css_element_selector& compound);
         // Built on demand; not thread safe, matching the rest of litehtml.
         mutable std::unique_ptr<selector_index> m_index;
 
@@ -92,7 +112,7 @@ namespace litehtml
         // compound can match an element with the given tag/id/classes/attributes. A candidate still
         // has to go through select(); this only rules out the impossible ones.
         void collect_candidates(string_id tag, string_id id, const std::vector<string_id>& classes,
-                                const string_map& attrs, std::vector<uint32_t>& out) const;
+                                const string_map& attrs, bool is_root, std::vector<uint32_t>& out) const;
 
         template <class Input>
         void parse_css_stylesheet(const Input& input, const std::string& baseurl, const std::shared_ptr<document>& doc,
