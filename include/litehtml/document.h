@@ -129,9 +129,12 @@ namespace litehtml
         void dump(dumper& cout);
 
         // see doc/document_createFromString.txt
+        // cache, when given, skips re-tokenising stylesheet text that has already been seen. It is
+        // only worth passing when the same document is rebuilt repeatedly; see css_cache.
         static document::ptr createFromString(const estring& str, document_container* container,
                                               const std::string& master_styles = litehtml::master_css,
-                                              const std::string& user_styles   = {});
+                                              const std::string& user_styles   = {},
+                                              css_cache*         cache         = nullptr);
 
       private:
         uint_ptr add_font(const font_description& descr, font_metrics* fm);

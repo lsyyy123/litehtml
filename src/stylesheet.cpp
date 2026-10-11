@@ -7,18 +7,49 @@
 
 namespace litehtml
 {
+    // Only the text form can be cached: a token vector has no cheap key, and the nested @media
+    // parses that use it are grouping already-tokenised input anyway.
+    inline const raw_rule::vector* cached_rules(css_cache* cache, const std::string& input, bool top_level)
+    {
+        return (cache && top_level) ? cache->find(input) : nullptr;
+    }
+    inline const raw_rule::vector* cached_rules(css_cache*, const css_token_vector&, bool)
+    {
+        return nullptr;
+    }
+    inline void cache_rules(css_cache* cache, const std::string& input, bool top_level,
+                            const raw_rule::vector& rules)
+    {
+        if(cache && top_level)
+        {
+            cache->store(input, rules);
+        }
+    }
+    inline void cache_rules(css_cache*, const css_token_vector&, bool, const raw_rule::vector&) {}
+
     // https://www.w3.org/TR/css-syntax-3/#parse-a-css-stylesheet
     template <class Input> // Input == string or css_token_vector
     void css::parse_css_stylesheet(const Input& input, const std::string& baseurl, const std::shared_ptr<document>& doc,
-                                   const media_query_list_list::ptr& media, bool top_level)
+                                   const media_query_list_list::ptr& media, bool top_level, css_cache* cache)
     {
         if(doc && media)
         {
             doc->add_media_list(media);
         }
 
-        // To parse a CSS stylesheet, first parse a stylesheet.
-        auto rules          = css_parser::parse_stylesheet(input, top_level);
+        // To parse a CSS stylesheet, first parse a stylesheet. The raw rules are read-only from
+        // here on (every consumer below takes them by const reference), so a cached vector can be
+        // handed to any number of documents.
+        raw_rule::vector              owned_rules;
+        const raw_rule::vector*       hit = cached_rules(cache, input, top_level);
+        if(hit == nullptr)
+        {
+            owned_rules = css_parser::parse_stylesheet(input, top_level);
+            cache_rules(cache, input, top_level, owned_rules);
+            hit = &owned_rules;
+        }
+        const raw_rule::vector& rules = *hit;
+
         bool import_allowed = top_level;
 
         // Interpret all of the resulting top-level qualified rules as style rules, defined below.
@@ -68,7 +99,7 @@ namespace litehtml
                         new_media = std::make_shared<media_query_list_list>(media ? *media : media_query_list_list());
                         new_media->add(mq_list);
                     }
-                    parse_css_stylesheet(rule->block.value, baseurl, doc, new_media, false);
+                    parse_css_stylesheet(rule->block.value, baseurl, doc, new_media, false, cache);
                     import_allowed = false;
                     break;
                 }

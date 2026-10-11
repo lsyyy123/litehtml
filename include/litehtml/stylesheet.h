@@ -62,6 +62,50 @@ namespace litehtml
         css_token        block;
     };
 
+    // Caches the syntactic parse of a stylesheet, keyed by its source text.
+    //
+    // Tokenising and grouping a stylesheet into raw rules depends on nothing but the text, so the
+    // result can be reused by any document. Everything document-specific is still redone on every
+    // parse: selector objects (whose m_order is per sheet), media query lists (which are registered
+    // with one document and carry its evaluation state) and URL resolution against the base URL and
+    // container. That is the line this cache deliberately stops at.
+    //
+    // The embedder owns the cache and decides its lifetime, which is also what keeps it off the
+    // shared-state path: litehtml is not thread safe, so a cache must not be shared across threads.
+    class css_cache
+    {
+      public:
+        const raw_rule::vector* find(const std::string& text) const
+        {
+            auto it = m_entries.find(text);
+            return it == m_entries.end() ? nullptr : &it->second;
+        }
+
+        void store(const std::string& text, raw_rule::vector rules)
+        {
+            // A page that rewrites its CSS on every pass would otherwise grow this without bound.
+            // Stable sheets are a handful of entries, so dropping everything is cheap insurance.
+            if(m_rules > kMaxRules)
+            {
+                clear();
+            }
+            m_rules += rules.size();
+            m_entries.emplace(text, std::move(rules));
+        }
+
+        void clear()
+        {
+            m_entries.clear();
+            m_rules = 0;
+        }
+
+      private:
+        static const size_t kMaxRules = 200000;
+
+        std::unordered_map<std::string, raw_rule::vector> m_entries;
+        size_t                                            m_rules = 0;
+    };
+
     class css
     {
         css_selector::vector m_selectors;
@@ -116,7 +160,8 @@ namespace litehtml
 
         template <class Input>
         void parse_css_stylesheet(const Input& input, const std::string& baseurl, const std::shared_ptr<document>& doc,
-                                  const media_query_list_list::ptr& media = nullptr, bool top_level = true);
+                                  const media_query_list_list::ptr& media = nullptr, bool top_level = true,
+                                  css_cache* cache = nullptr);
 
         void sort_selectors();
 

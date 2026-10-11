@@ -49,7 +49,8 @@ namespace litehtml
     }
 
     document::ptr document::createFromString(const estring& str, document_container* container,
-                                             const std::string& master_styles, const std::string& user_styles)
+                                             const std::string& master_styles, const std::string& user_styles,
+                                             css_cache* cache)
     {
         // Create litehtml::document
         document::ptr doc = std::make_shared<document>(container);
@@ -84,12 +85,12 @@ namespace litehtml
 
         if(master_styles != "")
         {
-            doc->m_master_css.parse_css_stylesheet(master_styles, "", doc);
+            doc->m_master_css.parse_css_stylesheet(master_styles, "", doc, nullptr, true, cache);
             doc->m_master_css.sort_selectors();
         }
         if(user_styles != "")
         {
-            doc->m_user_css.parse_css_stylesheet(user_styles, "", doc);
+            doc->m_user_css.parse_css_stylesheet(user_styles, "", doc, nullptr, true, cache);
             doc->m_user_css.sort_selectors();
         }
 
@@ -116,7 +117,7 @@ namespace litehtml
                     media        = std::make_shared<media_query_list_list>();
                     media->add(mq_list);
                 }
-                doc->m_styles.parse_css_stylesheet(css.text, css.baseurl, doc, media);
+                doc->m_styles.parse_css_stylesheet(css.text, css.baseurl, doc, media, true, cache);
             }
             // Sort css selectors using CSS rules.
             doc->m_styles.sort_selectors();
