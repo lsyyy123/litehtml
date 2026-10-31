@@ -199,6 +199,7 @@ namespace litehtml
             return true;
         }
         if(tok.type == PERCENTAGE) return out.from_token(tok, f_percentage);
+        if(tok.type == CV_FUNCTION) return out.from_token(tok, f_length_percentage | f_positive);
         if(tok.type == IDENT)
         {
             const std::string id = lowcase(tok.ident());
@@ -260,6 +261,11 @@ namespace litehtml
                     grid_track_vector mm;
                     if(!parse_grid_minmax(tok.value, mm)) return false;
                     for(auto& t : mm) push_track(t);
+                } else if(fn == "calc")
+                {
+                    grid_track_size trk;
+                    if(!trk.min.from_token(tok, f_length_percentage | f_positive)) return false;
+                    push_track(trk);
                 } else
                 {
                     return false; // fit-content()/etc. unsupported

@@ -165,7 +165,7 @@ void litehtml::flex_item_row_direction::direction_specific_init(const litehtml::
         predef = el->css().get_flex_basis().predef();
     } else
     {
-        if(el->css().get_flex_basis().val() < 0)
+        if(!el->css().get_flex_basis().is_math() && el->css().get_flex_basis().val() < 0)
         {
             flex_basis_predefined = true;
         }
@@ -355,7 +355,7 @@ void litehtml::flex_item_column_direction::direction_specific_init(const litehtm
         predef = el->css().get_flex_basis().predef();
     } else
     {
-        if(el->css().get_flex_basis().val() < 0)
+        if(!el->css().get_flex_basis().is_math() && el->css().get_flex_basis().val() < 0)
         {
             flex_basis_predefined = true;
         }
@@ -396,7 +396,7 @@ void litehtml::flex_item_column_direction::direction_specific_init(const litehtm
             }
         } else
         {
-            base_size = pixel_t(el->css().get_flex_basis().val()) + el->render_offset_height();
+            base_size = el->css().get_flex_basis().calc_percent(self_size.height) + el->render_offset_height();
         }
     }
 

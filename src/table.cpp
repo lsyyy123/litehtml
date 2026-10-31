@@ -352,13 +352,15 @@ litehtml::pixel_t litehtml::table_grid::calc_table_width(pixel_t block_width, bo
         {
             if(!m_columns[col].css_width.is_predefined() && m_columns[col].css_width.units() == css_units_percentage)
             {
-                percent += m_columns[col].css_width.val();
+                percent += m_columns[col].css_width.percentage_value();
+                if(m_columns[col].css_width.is_math())
+                    fixed_width += pixel_t(m_columns[col].css_width.val());
             } else
             {
                 fixed_width += m_columns[col].width;
             }
         }
-        auto scale = static_cast<float>(100.0 / percent);
+        auto scale = percent != 0 ? static_cast<float>(100.0 / percent) : 1.0f;
         if(pixel_t(scale) != 1_px)
         {
             cur_width = 0;
@@ -368,8 +370,10 @@ litehtml::pixel_t litehtml::table_grid::calc_table_width(pixel_t block_width, bo
                    m_columns[col].css_width.units() == css_units_percentage)
                 {
                     css_length w;
-                    w.set_value(m_columns[col].css_width.val() * scale, css_units_percentage);
+                    const auto& length = m_columns[col].css_width;
+                    w.set_value(length.percentage_value() * scale, css_units_percentage);
                     m_columns[col].width = w.calc_percent(block_width - fixed_width);
+                    if(length.is_math()) m_columns[col].width += pixel_t(length.val());
                     if(m_columns[col].width < m_columns[col].min_width)
                     {
                         m_columns[col].width = m_columns[col].min_width;

@@ -696,6 +696,15 @@ std::list<std::unique_ptr<litehtml::line_box_item>> litehtml::line_box::finish(
             inlines.back().box.x      = lbi->left();
             inlines.back().box.y      = lbi->top() - lbi->get_el()->content_offset_top();
             inlines.back().box.height = lbi->bottom() - lbi->top() + lbi->get_el()->content_offset_height();
+            // The inline's box is its content area (ascent + descent around the
+            // baseline), not the leading-inflated font height.
+            const font_metrics& ifm = lbi->get_el()->css().get_font_metrics();
+            if(ifm.content_ascent > 0_px || ifm.content_descent > 0_px)
+            {
+                inlines.back().box.y += ifm.ascent - ifm.content_ascent;
+                inlines.back().box.height =
+                    ifm.content_ascent + ifm.content_descent + lbi->get_el()->content_offset_height();
+            }
         } else if(lbi->get_type() == line_box_item::type_inline_end)
         {
             if(!inlines.empty())

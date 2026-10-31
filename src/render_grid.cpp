@@ -471,6 +471,8 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
     // explicit column is a percentage, phase 2 re-resolves those tracks against
     // that intrinsic width (CSS Grid 5.1.1: % against an indefinite size first
     // computes the intrinsic size, then resolves the percentage against it).
+    pixel_t intrinsic_percentage_width = 0_px;
+    bool preserve_intrinsic_width = false;
     if(!width_definite)
     {
         bool has_pct_col = false;
@@ -484,6 +486,8 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
             pixel_t intrinsic = 0_px;
             for(int c = 0; c < ncols; c++) intrinsic += col_w[c];
             if(ncols > 1) intrinsic += pixel_t(ncols - 1) * col_gap;
+            intrinsic_percentage_width = intrinsic;
+            preserve_intrinsic_width = true;
             col_w = resolve_columns(cols_t, intrinsic, /*available_definite=*/true, items, areas,
                                     ncols, self_size, fmt_ctx, col_gap, &col_is_auto);
         }
@@ -512,6 +516,9 @@ litehtml::rendered_width litehtml::render_item_grid::_render_content(pixel_t x, 
         }
         if(ncols > 1) grid_width += pixel_t(ncols - 1) * col_gap;
     }
+    // Percentage tracks resolve only after intrinsic container sizing; their
+    // used size must not shrink that container and create a new percentage base.
+    if(preserve_intrinsic_width) grid_width = intrinsic_percentage_width;
     ret_width = grid_width;
 
     // Pass 1: render each item at its column width (normal mode -> auto width

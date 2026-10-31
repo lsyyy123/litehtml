@@ -42,6 +42,8 @@ namespace litehtml
         input = result;
     }
 
+    // Whitespace in calc() is grammar-significant for binary +/-. Preserve
+    // the whole component subtree (including parenthesized/nested sums).
     static const size_t kLargeSize = 50;
     static void         remove_whitespace_large(css_token_vector& tokens, const keep_whitespace_fn& keep_whitespace);
     static void         remove_whitespace_small(css_token_vector& tokens, const keep_whitespace_fn& keep_whitespace);
@@ -59,7 +61,8 @@ namespace litehtml
                 const auto& left  = i > 0 ? tokens[i - 1] : css_token();
                 const auto& right = at(tokens, i + 1);
                 keep              = keep_whitespace && keep_whitespace(left, right);
-            } else if(tok.is_component_value())
+            } else if(tok.is_component_value() &&
+                      !(tok.type == CV_FUNCTION && lowcase(tok.name()) == "calc"))
             {
                 if(tok.value.size() > kLargeSize)
                 {
@@ -102,7 +105,8 @@ namespace litehtml
                 {
                     remove(tokens, i), i--;
                 }
-            } else if(tok.is_component_value())
+            } else if(tok.is_component_value() &&
+                      !(tok.type == CV_FUNCTION && lowcase(tok.name()) == "calc"))
             {
                 if(tok.value.size() > kLargeSize)
                 {

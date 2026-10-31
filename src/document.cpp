@@ -50,7 +50,8 @@ namespace litehtml
 
     document::ptr document::createFromString(const estring& str, document_container* container,
                                              const std::string& master_styles, const std::string& user_styles,
-                                             css_cache* cache)
+                                             css_cache* cache,
+                                             const document_create_options& options)
     {
         // Create litehtml::document
         document::ptr doc = std::make_shared<document>(container);
@@ -58,18 +59,37 @@ namespace litehtml
         // Parse document into GumboOutput
         GumboOutput* output = doc->parse_html(str);
 
-        // mode must be set before doc->create_node because it is used in html_tag::set_attr
-        switch(output->document->v.document.doc_type_quirks_mode)
+        // Mode must be set before create_node because html_tag::set_attr and
+        // selector parsing consume it. Embedders with an authoritative HTML
+        // parser may force the already-classified mode; standalone callers
+        // retain Gumbo's doctype classification.
+        if(options.force_mode)
         {
-        case GUMBO_DOCTYPE_NO_QUIRKS:
-            doc->m_mode = no_quirks_mode;
-            break;
-        case GUMBO_DOCTYPE_QUIRKS:
-            doc->m_mode = quirks_mode;
-            break;
-        case GUMBO_DOCTYPE_LIMITED_QUIRKS:
-            doc->m_mode = limited_quirks_mode;
-            break;
+            switch(options.mode)
+            {
+            case no_quirks_mode:
+            case quirks_mode:
+            case limited_quirks_mode:
+                doc->m_mode = options.mode;
+                break;
+            default:
+                gumbo_destroy_output(&kGumboDefaultOptions, output);
+                return nullptr;
+            }
+        } else
+        {
+            switch(output->document->v.document.doc_type_quirks_mode)
+            {
+            case GUMBO_DOCTYPE_NO_QUIRKS:
+                doc->m_mode = no_quirks_mode;
+                break;
+            case GUMBO_DOCTYPE_QUIRKS:
+                doc->m_mode = quirks_mode;
+                break;
+            case GUMBO_DOCTYPE_LIMITED_QUIRKS:
+                doc->m_mode = limited_quirks_mode;
+                break;
+            }
         }
 
         // Create litehtml::elements.
@@ -555,6 +575,19 @@ namespace litehtml
         {
             return 0_px;
         }
+        if(val.m_math)
+        {
+            double value = val.m_math->coefficients[css_units_percentage] * size.value() / 100.0;
+            for(size_t unit = css_units_in; unit < css_units_fr; ++unit)
+            {
+                const double coefficient = val.m_math->coefficients[unit];
+                if(coefficient != 0)
+                    value += to_pixels(css_length(static_cast<float>(coefficient),
+                                      static_cast<css_units>(unit)), metrics, size).value();
+            }
+            if(val.m_math->non_negative && value < 0) value = 0;
+            return pixel_t(static_cast<float>(value));
+        }
         pixel_t ret;
         switch(val.units())
         {
@@ -616,7 +649,32 @@ namespace litehtml
         {
             return;
         }
-        if(val.units() != css_units_percentage)
+        if(val.m_math)
+        {
+            // Convert only the length portion, never resolve % against the
+            // style-computation placeholder base (usually zero). Each render
+            // then evaluates the affine result against its current container.
+            auto math = std::make_shared<css_length::math_value>(*val.m_math);
+            double px = 0;
+            for(size_t unit = css_units_in; unit < css_units_fr; ++unit)
+            {
+                const double coefficient = math->coefficients[unit];
+                if(coefficient != 0)
+                    px += to_pixels(css_length(static_cast<float>(coefficient),
+                                   static_cast<css_units>(unit)), metrics, size).value();
+                math->coefficients[unit] = 0;
+            }
+            if(!math->has_percentage)
+            {
+                if(math->non_negative && px < 0) px = 0;
+                val.set_value(static_cast<float>(px), css_units_px);
+            } else
+            {
+                math->coefficients[css_units_px] = px;
+                val.m_value = static_cast<float>(px);
+                val.m_math = std::move(math);
+            }
+        } else if(val.units() != css_units_percentage)
         {
             val.set_value(static_cast<float>(to_pixels(val, metrics, size)), css_units_px);
         }
@@ -856,8 +914,14 @@ namespace litehtml
 
     bool document::media_changed()
     {
+        const pixel_t previous_width = m_media.width;
+        const pixel_t previous_height = m_media.height;
         container()->get_media_features(m_media);
-        if(update_media_lists(m_media))
+        const bool viewport_changed = previous_width != m_media.width || previous_height != m_media.height;
+        const bool media_styles_changed = update_media_lists(m_media);
+        // vw/vh/vmin/vmax are computed lengths even without @media rules.
+        // Recompute from the unconverted declaration coefficients on resize.
+        if(media_styles_changed || viewport_changed)
         {
             m_root->refresh_styles();
             m_root->compute_styles();

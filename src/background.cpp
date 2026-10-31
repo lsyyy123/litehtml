@@ -833,6 +833,11 @@ namespace litehtml
     // normalize length into value between 0 and 1
     float normalize_length(css_length length, float line_len)
     {
+        if(length.is_math())
+        {
+            const float value = length.calc_percent(pixel_t(line_len)).value();
+            return line_len != 0 ? value / line_len : value;
+        }
         if(length.units() == css_units_percentage)
         {
             return length.val() / 100.0f;

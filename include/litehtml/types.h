@@ -311,6 +311,10 @@ namespace litehtml
         pixel_t sub_shift;
         // The baseline shift for superscripts.
         pixel_t super_shift;
+        // Font ascent/descent without leading (the inline content area). Zero
+        // when the container does not distinguish them from ascent/descent.
+        pixel_t content_ascent = 0;
+        pixel_t content_descent = 0;
 
         pixel_t base_line() const
         {

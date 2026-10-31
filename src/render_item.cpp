@@ -1471,7 +1471,8 @@ litehtml::containing_block_context litehtml::render_item::calculate_containing_b
             const auto* width = &css().get_width();
             if(par && (par->css().get_display() == display_flex || par->css().get_display() == display_inline_flex))
             {
-                if(!css().get_flex_basis().is_predefined() && css().get_flex_basis().val() >= 0)
+                if(!css().get_flex_basis().is_predefined() &&
+                   (css().get_flex_basis().is_math() || css().get_flex_basis().val() >= 0))
                 {
                     if(par->css().get_flex_direction() == flex_direction_row ||
                        par->css().get_flex_direction() == flex_direction_row_reverse)
@@ -1496,7 +1497,8 @@ litehtml::containing_block_context litehtml::render_item::calculate_containing_b
             const auto* height = &css().get_height();
             if(par && (par->css().get_display() == display_flex || par->css().get_display() == display_inline_flex))
             {
-                if(!css().get_flex_basis().is_predefined() && css().get_flex_basis().val() >= 0)
+                if(!css().get_flex_basis().is_predefined() &&
+                   (css().get_flex_basis().is_math() || css().get_flex_basis().val() >= 0))
                 {
                     if(par->css().get_flex_direction() == flex_direction_column ||
                        par->css().get_flex_direction() == flex_direction_column_reverse)
@@ -1510,6 +1512,15 @@ litehtml::containing_block_context litehtml::render_item::calculate_containing_b
             if(height != nullptr)
             {
                 calc_cb_length(*height, cb_context.height, ret.height);
+                if(height->is_math() && height->has_percentage())
+                {
+                    // A zero used height is still definite (e.g. a negative
+                    // calculation clamped to zero), not the legacy %/auto
+                    // sentinel. An indefinite containing height stays auto.
+                    ret.height.type = cb_context.height.type == containing_block_context::cbc_value_type_absolute ?
+                        containing_block_context::cbc_value_type_absolute :
+                        containing_block_context::cbc_value_type_auto;
+                }
             }
         }
         if(ret.width.type != containing_block_context::cbc_value_type_auto &&

@@ -2,6 +2,8 @@
 #define LITEHTML_CSS_LENGTH_H
 
 #include <string>
+#include <array>
+#include <memory>
 #include "css_tokenizer.h"
 #include "css_values.h"
 #include "pixel_type.h"
@@ -30,6 +32,18 @@ namespace litehtml
         css_units m_units         = css_units_none;
         bool      m_is_predefined = false;
 
+        // Immutable affine sum. Relative units remain symbolic until computed
+        // style; the percentage term remains symbolic until used-value layout.
+        // Shared ownership keeps css_length copies cheap and mutation independent.
+        struct math_value
+        {
+            std::array<double, css_units_fr + 1> coefficients{};
+            bool has_percentage = false; // retained even when its coefficient is zero
+            bool non_negative = false;
+        };
+        std::shared_ptr<const math_value> m_math;
+        friend class document;
+
       public:
         css_length() = default;
         css_length(float val, css_units units = css_units_px);
@@ -43,6 +57,16 @@ namespace litehtml
         float             val() const;
         css_units         units() const;
         pixel_t           calc_percent(pixel_t width) const;
+        bool              is_math() const { return bool(m_math); }
+        float             percentage_value() const
+        {
+            return m_math ? static_cast<float>(m_math->coefficients[css_units_percentage]) :
+                   (!m_is_predefined && m_units == css_units_percentage ? m_value : 0);
+        }
+        bool              has_percentage() const
+        {
+            return !m_is_predefined && (m_math ? m_math->has_percentage : m_units == css_units_percentage);
+        }
         bool              from_token(const css_token& token, int options, css_values predefined_keywords = {});
         std::string       to_string() const;
     };
@@ -57,6 +81,7 @@ namespace litehtml
 
     inline css_length& css_length::operator=(float val)
     {
+        m_math.reset();
         m_value         = val;
         m_units         = css_units_px;
         m_is_predefined = false;
@@ -70,6 +95,7 @@ namespace litehtml
 
     inline void css_length::predef(int val)
     {
+        m_math.reset();
         m_predef        = val;
         m_is_predefined = true;
     }
@@ -85,6 +111,7 @@ namespace litehtml
 
     inline void css_length::set_value(float val, css_units units)
     {
+        m_math.reset();
         m_value         = val;
         m_is_predefined = false;
         m_units         = units;
@@ -108,6 +135,14 @@ namespace litehtml
     {
         if(!is_predefined())
         {
+            if(m_math)
+            {
+                // cvt_units has already converted the non-percentage terms.
+                double value = m_math->coefficients[css_units_px] +
+                               m_math->coefficients[css_units_percentage] * width.value() / 100.0;
+                if(m_math->non_negative && value < 0) value = 0;
+                return pixel_t(static_cast<float>(value));
+            }
             if(units() == css_units_percentage)
             {
                 return width * m_value / 100.0_px;

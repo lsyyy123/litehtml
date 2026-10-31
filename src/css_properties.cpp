@@ -394,15 +394,10 @@ void litehtml::css_properties::compute_font(const html_tag* el, const document::
         }
     } else
     {
-        if(sz.units() == css_units_percentage)
-        {
-            font_size = sz.calc_percent(parent_sz);
-        } else
-        {
-            font_metrics fm;
-            fm.x_height = fm.font_size = parent_sz;
-            font_size                  = doc->to_pixels(sz, fm, 0_px);
-        }
+        font_metrics fm = el->parent() ? el->parent()->css().get_font_metrics() : font_metrics{};
+        fm.font_size = parent_sz;
+        if(!el->parent()) fm.x_height = parent_sz;
+        font_size = doc->to_pixels(sz, fm, parent_sz);
     }
 
     m_font_size = static_cast<float>(font_size);
@@ -509,7 +504,10 @@ void litehtml::css_properties::compute_font(const html_tag* el, const document::
 
     font_description descr;
     descr.family               = m_font_family;
-    descr.size                 = std::round(font_size.value());
+    // Keep the CSS used value. Rounding here makes 13.333333px controls and
+    // ordinary text use a 13px face, although Blink shapes at the fractional
+    // CSS size and only applies device-pixel rounding to final geometry.
+    descr.size                 = font_size;
     descr.style                = m_font_style;
     descr.weight               = static_cast<int>(m_font_weight.val());
     descr.decoration_line      = m_text_decoration_line;

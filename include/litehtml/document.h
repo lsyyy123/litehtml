@@ -14,6 +14,12 @@ using GumboOutput = struct GumboInternalOutput;
 
 namespace litehtml
 {
+    struct document_create_options
+    {
+        document_mode mode = no_quirks_mode;
+        bool force_mode = false;
+    };
+
     struct css_text
     {
         using vector = std::vector<css_text>;
@@ -134,7 +140,8 @@ namespace litehtml
         static document::ptr createFromString(const estring& str, document_container* container,
                                               const std::string& master_styles = litehtml::master_css,
                                               const std::string& user_styles   = {},
-                                              css_cache*         cache         = nullptr);
+                                              css_cache*         cache         = nullptr,
+                                              const document_create_options& options = {});
 
       private:
         uint_ptr add_font(const font_description& descr, font_metrics* fm);
